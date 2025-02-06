@@ -10,7 +10,7 @@ import getpass
 class CatScaleModule(ToolModule):
     def __init__(self):
         self.repo_url = "https://github.com/sPROFFEs/LinuxCatScale"
-        self.base_script_path = Path(__file__).parent.parent / "modules" / "scripts"
+        self.scripts_dir = Path(__file__).parent.parent.parent / "scripts" / "Forensics" / "LinuxCatScale"
         super().__init__()
   
     def _get_name(self):
@@ -29,8 +29,8 @@ class CatScaleModule(ToolModule):
         return ["tar", "sha1sum", "find", "grep"]
 
     def _get_script_path(self) -> str:
-        """Retorna la ruta al script bash"""
-        return str(Path(__file__).parent.parent / "modules" / "scripts" / "LinuxCatScale" / "Cat-Scale.sh")
+        """Returns path to script"""
+        return str(self.scripts_dir / "Cat-Scale.sh")
 
     def get_help(self) -> dict:
         """
@@ -64,32 +64,29 @@ class CatScaleModule(ToolModule):
         }
 
     def check_installation(self) -> bool:
-        """
-        Verifica la instalación comprobando la existencia del repositorio y sus archivos
-        """
-        scripts_dir = Path(__file__).parent.parent / "modules" / "scripts"
-        repo_dir = scripts_dir / "LinuxCatScale"  # Directorio del repositorio clonado
+        """Verifies tool installation and requirements"""
+        scripts_dir = self.scripts_dir
         
-        # Lista de archivos requeridos
+        # List of required files
         required_files = [
             "Cat-Scale.sh",
             "patterns",
             "Cat-Scale-logstash.conf"
         ]
         
-        # Verificar que existe el directorio del repositorio
-        if not repo_dir.exists() or not repo_dir.is_dir():
+        # Verify that directory exists
+        if not scripts_dir.exists() or not scripts_dir.is_dir():
             self._installed = False
             return False
             
-        # Verificar que existen todos los archivos necesarios
+        # Verify that all required files exist
         for file in required_files:
-            if not (repo_dir / file).exists():
+            if not (scripts_dir / file).exists():
                 self._installed = False
                 return False
                 
-        # Verificar que el script principal tiene permisos de ejecución
-        script_path = repo_dir / "Cat-Scale.sh"
+        # Verify script permissions
+        script_path = scripts_dir / "Cat-Scale.sh"
         if not os.access(script_path, os.X_OK):
             try:
                 os.chmod(script_path, 0o755)
@@ -97,41 +94,37 @@ class CatScaleModule(ToolModule):
                 self._installed = False
                 return False
         
-        # Si todo está correcto, actualizar la ruta de instalación y retornar True
         self._installed = True
-        self._custom_install_path = str(script_path)
         return True
 
 
-    def _get_install_command(self, pkg_manager: str) -> dict:
-        """Diccionario de comandos de instalación por gestor de paquetes"""
+    def _get_install_command(self, pkg_manager: str) -> List[str]:
+        """Returns installation commands for different package managers"""
+        
+        # Create category-specific scripts directory
+        self.scripts_dir.mkdir(parents=True, exist_ok=True)
+        
         commands = {
             'apt': [
                 "sudo apt-get update",
                 "sudo apt-get install -y coreutils findutils grep git rename",
-                f"mkdir -p {self.base_script_path}",
-                f"cd {self.base_script_path} && git clone {self.repo_url}"
+                f"git clone {self.repo_url} {self.scripts_dir}",
+                f"chmod +x {self.scripts_dir}/Cat-Scale.sh"
             ],
             'yum': [
                 "sudo yum update -y",
                 "sudo yum install -y coreutils findutils grep git rename",
-                f"mkdir -p {self.base_script_path}",
-                f"cd {self.base_script_path} && git clone {self.repo_url}"
-            ],
-            'dnf': [
-                "sudo dnf update -y",
-                "sudo dnf install -y coreutils findutils grep git rename",
-                f"mkdir -p {self.base_script_path}",
-                f"cd {self.base_script_path} && git clone {self.repo_url}"
+                f"git clone {self.repo_url} {self.scripts_dir}",
+                f"chmod +x {self.scripts_dir}/Cat-Scale.sh"
             ],
             'pacman': [
                 "sudo pacman -Sy",
-                "sudo pacman -S coreutils findutils grep git rename",
-                f"mkdir -p {self.base_script_path}",
-                f"cd {self.base_script_path} && git clone {self.repo_url}"
+                "sudo pacman -S coreutils findutils grep git rename --noconfirm",
+                f"git clone {self.repo_url} {self.scripts_dir}",
+                f"chmod +x {self.scripts_dir}/Cat-Scale.sh"
             ]
         }
-        return commands.get(pkg_manager, {})
+        return commands.get(pkg_manager, [])
 
     def _get_update_command(self, pkg_manager: str) -> dict:
         """Diccionario de comandos de actualización por gestor de paquetes"""
@@ -139,30 +132,30 @@ class CatScaleModule(ToolModule):
             'apt': [
                 "sudo apt-get update",
                 "sudo apt-get install -y coreutils findutils grep git rename",
-                f"mkdir -p {self.base_script_path}",
-                f"rm -rf {self.base_script_path}/LinuxCatScale",
-                f"cd {self.base_script_path} && git clone {self.repo_url}"
+                f"mkdir -p {self.scripts_dir}",
+                f"rm -rf {self.scripts_dir}/LinuxCatScale",
+                f"cd {self.scripts_dir} && git clone {self.repo_url}"
             ],
             'yum': [
                 "sudo yum update -y",
                 "sudo yum install -y coreutils findutils grep git rename",
-                f"mkdir -p {self.base_script_path}",
-                f"rm -rf {self.base_script_path}/LinuxCatScale",
-                f"cd {self.base_script_path} && git clone {self.repo_url}"
+                f"mkdir -p {self.scripts_dir}",
+                f"rm -rf {self.scripts_dir}/LinuxCatScale",
+                f"cd {self.scripts_dir} && git clone {self.repo_url}"
             ],
             'dnf': [
                 "sudo dnf update -y",
                 "sudo dnf install -y coreutils findutils grep git rename",
-                f"mkdir -p {self.base_script_path}",
-                f"rm -rf {self.base_script_path}/LinuxCatScale",
-                f"cd {self.base_script_path} && git clone {self.repo_url}"
+                f"mkdir -p {self.scripts_dir}",
+                f"rm -rf {self.scripts_dir}/LinuxCatScale",
+                f"cd {self.scripts_dir} && git clone {self.repo_url}"
             ],
             'pacman': [
                 "sudo pacman -Sy",
                 "sudo pacman -S coreutils findutils grep git rename",
-                f"mkdir -p {self.base_script_path}",
-                f"rm -rf {self.base_script_path}/LinuxCatScale",
-                f"cd {self.base_script_path} && git clone {self.repo_url}"
+                f"mkdir -p {self.scripts_dir}",
+                f"rm -rf {self.scripts_dir}/LinuxCatScale",
+                f"cd {self.scripts_dir} && git clone {self.repo_url}"
             ]
         }
         return commands.get(pkg_manager, {})
@@ -171,16 +164,16 @@ class CatScaleModule(ToolModule):
         """Diccionario de comandos de desinstalación por gestor de paquetes"""
         commands = {
             'apt': [
-                f"rm -rf {self.base_script_path}/LinuxCatScale",
+                f"rm -rf {self.scripts_dir}",
             ],
             'yum': [
-                f"rm -rf {self.base_script_path}/LinuxCatScale",
+                f"rm -rf {self.scripts_dir}",
             ],
             'dnf': [
-                f"rm -rf {self.base_script_path}/LinuxCatScale",
+                f"rm -rf {self.scripts_dir}",
             ],
             'pacman': [
-                f"rm -rf {self.base_script_path}/LinuxCatScale",
+                f"rm -rf {self.scripts_dir}",
             ]
         }
         return commands.get(pkg_manager, {})

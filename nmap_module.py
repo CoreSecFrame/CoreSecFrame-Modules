@@ -1,66 +1,74 @@
-# modules/nmap_module.py
 from core.base import ToolModule
-from typing import List
+from core.colors import Colors
 import subprocess
 import platform
 import os
-
-
-class Colors:
-    HEADER = '\033[95m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    GREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-
+from typing import List, Dict, Optional
+from pathlib import Path
 
 class NmapModule(ToolModule):
     def _get_name(self) -> str:
         return "Nmap"
 
+    def _get_category(self) -> str:
+        return "Network"
+
     def _get_command(self) -> str:
         return "nmap"
 
     def _get_description(self) -> str:
-        return "Scanner de puertos y análisis de red avanzado"
+        return "Advanced network scanner and security auditing tool"
 
     def _get_dependencies(self) -> List[str]:
         return ["nmap"]
 
+    def _get_script_path(self) -> str:
+        """Returns path to script if applicable"""
+        return ""  # Nmap is a binary, no script needed
+
     def get_help(self) -> dict:
-        """
-        Proporciona la documentación de ayuda específica de nmap
-        """
         return {
-            "title": "TEST",
-            "usage": "TEST",
-            "desc": "TEST",
+            "title": "Nmap - Network Scanner",
+            "usage": "use nmap",
+            "desc": "Advanced network scanner for security auditing and network exploration",
             "modes": {
-                "Guiado": "Modo interactivo que solicita la información necesaria paso a paso",
-                "Directo": "Modo que acepta todos los parámetros en la línea de comandos"
+                "Guided": "Interactive mode that guides through scan configuration",
+                "Direct": "Direct command execution with full nmap syntax support"
             },
             "options": {
-                "TEST": "TEST",
+                "-sS": "TCP SYN scan (default)",
+                "-sT": "TCP connect scan",
+                "-sU": "UDP scan",
+                "-sV": "Version detection",
+                "-O": "OS detection",
+                "-A": "Aggressive scan (OS detection, version detection, script scanning, traceroute)",
+                "-p": "Port specification (e.g., -p 80,443 or -p-)",
+                "-T<0-5>": "Timing template (higher is faster)",
+                "--script": "NSE script selection",
+                "-oN": "Output to normal format",
+                "-oX": "Output to XML format"
             },
             "examples": [
-                "TEST"
+                "nmap -sS -sV 192.168.1.0/24",
+                "nmap -A -T4 example.com",
+                "nmap -p 1-65535 -sV -sS -T4 target",
+                "nmap -sU -sS -p U:53,111,137,T:21-25,80,139,8080 target",
+                "nmap --script vuln target"
             ],
             "notes": [
-                "TEST"
+                "Some scans require root/sudo privileges",
+                "Higher timing templates may affect accuracy",
+                "Version detection (-sV) may increase scan time significantly",
+                "Use with caution on production networks"
             ]
         }
 
-    def get_package_install(self) -> dict:
-        """
-        Diccionario de comandos de instalación por gestor de paquetes
-        """
-        return {
+    def _get_install_command(self, pkg_manager: str) -> List[str]:
+        """Returns installation commands for different package managers"""
+        commands = {
             'apt': [
-                "sudo apt update",
-                "sudo apt install -y nmap"
+                "sudo apt-get update",
+                "sudo apt-get install -y nmap"
             ],
             'yum': [
                 "sudo yum update",
@@ -72,35 +80,18 @@ class NmapModule(ToolModule):
             ],
             'pacman': [
                 "sudo pacman -Sy",
-                "sudo pacman -S nmap"
+                "sudo pacman -S nmap --noconfirm"
             ]
         }
+        return commands.get(pkg_manager, [])
 
-    def get_package_update(self) -> dict:
-        """
-        Diccionario de comandos de actualización por gestor de paquetes
-        """
-        return {
-            'apt': [
-                "sudo apt update",
-                "sudo apt install -y nmap"
-            ],
-            'yum': [
-                "sudo yum update -y nmap"
-            ],
-            'dnf': [
-                "sudo dnf update -y nmap"
-            ],
-            'pacman': [
-                "sudo pacman -Syu nmap"
-            ]
-        }
+    def _get_update_command(self, pkg_manager: str) -> List[str]:
+        """Returns update commands for different package managers"""
+        return self._get_install_command(pkg_manager)  # Same as install for nmap
 
-    def get_package_remove(self) -> dict:
-        """
-        Diccionario de comandos de desinstalación por gestor de paquetes
-        """
-        return {
+    def _get_uninstall_command(self, pkg_manager: str) -> List[str]:
+        """Returns uninstallation commands for different package managers"""
+        commands = {
             'apt': [
                 "sudo apt-get remove -y nmap",
                 "sudo apt-get autoremove -y"
@@ -114,121 +105,86 @@ class NmapModule(ToolModule):
                 "sudo dnf autoremove -y"
             ],
             'pacman': [
-                "sudo pacman -R nmap"
+                "sudo pacman -Rs nmap --noconfirm"
             ]
         }
+        return commands.get(pkg_manager, [])
 
     def _show_banner(self):
+        """Display the module banner"""
         banner = f'''
 {Colors.CYAN}╔══════════════════════════════════════════╗
-║              NMAP SCANNER               ║
+║             NMAP SCANNER                 ║
+║    "Network Mapper - Security Scanner"   ║
 ╚══════════════════════════════════════════╝{Colors.ENDC}'''
         print(banner)
 
-    def _get_target(self) -> str:
-        """Solicita y valida el objetivo del escaneo"""
+    def _get_target(self) -> Optional[str]:
+        """Get and validate scan target"""
         while True:
-            target = input(f"{Colors.BOLD}[+] Objetivo (IP/dominio/rango): {Colors.ENDC}").strip()
-            if target:
-                return target
-            print(f"{Colors.FAIL}[!] Error: Debes especificar un objetivo{Colors.ENDC}")
+            target = input(f"\n{Colors.BOLD}[+] Target (IP/domain/range): {Colors.ENDC}").strip()
+            if not target:
+                print(f"{Colors.FAIL}[!] Target is required{Colors.ENDC}")
+                continue
+            return target
 
-    def _get_scan_type(self) -> str:
-        """Muestra menú de tipos de escaneo y retorna la opción seleccionada"""
-        print(f"\n{Colors.CYAN}[*] Tipos de escaneo disponibles:{Colors.ENDC}")
-        options = {
-            "1": ("Escaneo rápido", "--top-ports 100 -T4"),
-            "2": ("Escaneo común", "--top-ports 1000"),
-            "3": ("Escaneo completo", "-p-"),
-            "4": ("Escaneo sigiloso", "-sS -T2"),
-            "5": ("Detección de versiones", "-sV"),
-            "6": ("Escaneo agresivo", "-A"),
-            "7": ("Personalizado", "")
+    def _get_scan_profile(self) -> str:
+        """Get scan profile from predefined options"""
+        print(f"\n{Colors.CYAN}[*] Select Scan Profile:{Colors.ENDC}")
+        profiles = {
+            "1": ("Quick Scan", "-T4 --top-ports 100", "Fast scan of most common ports"),
+            "2": ("Basic Network Scan", "-sV -T4", "Version detection on default ports"),
+            "3": ("Full System Scan", "-sS -sV -O -T4", "Comprehensive system scan"),
+            "4": ("Vulnerability Scan", "-sV --script vuln -T4", "Check for known vulnerabilities"),
+            "5": ("Stealth Scan", "-sS -T2", "Slower, stealthier scan"),
+            "6": ("UDP Service Scan", "-sU -sV --top-ports 100", "Scan UDP services"),
+            "7": ("Complete Scan", "-sS -sU -T4 -A -v", "Full-featured scan"),
+            "8": ("Custom Scan", "", "Define custom options")
         }
 
-        for key, (name, _) in options.items():
-            print(f"{Colors.GREEN}{key}:{Colors.ENDC} {name}")
+        for key, (name, _, desc) in profiles.items():
+            print(f"{Colors.GREEN}{key}:{Colors.ENDC} {name} - {desc}")
 
         while True:
-            try:
-                choice = input(f"\n{Colors.BOLD}[+] Selecciona tipo de escaneo (1-7): {Colors.ENDC}").strip()
-                if choice in options:
-                    return options[choice][1]
-                print(f"{Colors.FAIL}[!] Opción no válida{Colors.ENDC}")
-            except KeyboardInterrupt:
-                print("\n")
-                return ""
-
-    def _get_additional_options(self) -> str:
-        """Solicita opciones adicionales para el escaneo"""
-        options = []
-
-        try:
-            if input(f"\n{Colors.BOLD}[+] ¿Detectar sistema operativo? (s/N): {Colors.ENDC}").lower() == 's':
-                options.append("-O")
-
-            if input(f"{Colors.BOLD}[+] ¿Ejecutar scripts por defecto? (s/N): {Colors.ENDC}").lower() == 's':
-                options.append("-sC")
-
-            if input(f"{Colors.BOLD}[+] ¿Mostrar solo puertos abiertos? (s/N): {Colors.ENDC}").lower() == 's':
-                options.append("--open")
-
-            timing = input(f"{Colors.BOLD}[+] Velocidad de escaneo (0-5, Enter para default): {Colors.ENDC}").strip()
-            if timing and timing in "012345":
-                options.append(f"-T{timing}")
-
-            return " ".join(options)
-        except KeyboardInterrupt:
-            print("\n")
-            return ""
+            choice = input(f"\n{Colors.BOLD}[+] Select profile (1-8): {Colors.ENDC}").strip()
+            if choice in profiles:
+                return profiles[choice][1]
+            print(f"{Colors.FAIL}[!] Invalid choice{Colors.ENDC}")
 
     def _get_output_options(self) -> str:
-        """Configura opciones de salida"""
+        """Configure output options"""
         options = []
-
-        try:
-            if input(f"\n{Colors.BOLD}[+] ¿Guardar resultado en archivo? (s/N): {Colors.ENDC}").lower() == 's':
-                filename = input(f"{Colors.BOLD}[+] Nombre del archivo (sin extensión): {Colors.ENDC}").strip()
+        
+        if input(f"\n{Colors.BOLD}[+] Save results to file? (y/N): {Colors.ENDC}").lower() == 'y':
+            while True:
+                filename = input(f"{Colors.BOLD}[+] Enter filename (without extension): {Colors.ENDC}").strip()
                 if filename:
-                    options.extend(["-oN", f"{filename}.txt", "-oX", f"{filename}.xml"])
+                    # Create output directory if it doesn't exist
+                    output_dir = Path("nmap_scans")
+                    output_dir.mkdir(exist_ok=True)
+                    
+                    # Add output options for both normal and XML formats
+                    normal_file = output_dir / f"{filename}.txt"
+                    xml_file = output_dir / f"{filename}.xml"
+                    options.extend(["-oN", str(normal_file), "-oX", str(xml_file)])
+                    break
+                print(f"{Colors.FAIL}[!] Filename is required{Colors.ENDC}")
 
-            return " ".join(options)
-        except KeyboardInterrupt:
-            print("\n")
-            return ""
+        return " ".join(options)
 
-    def run_guided(self) -> None:
-        """Modo guiado mejorado para Nmap"""
-        self._show_banner()
-
+    def _execute_scan(self, command: str) -> None:
+        """Execute nmap scan with real-time output"""
         try:
-            # Recopilar información
-            target = self._get_target()
-            if not target:
-                return
-
-            scan_type = self._get_scan_type()
-            if not scan_type:
-                return
-
-            additional_opts = self._get_additional_options()
-            output_opts = self._get_output_options()
-
-            # Construir y ejecutar comando
-            command = f"nmap {scan_type} {additional_opts} {output_opts} {target}"
-
-            print(f"\n{Colors.CYAN}[*] Ejecutando comando:{Colors.ENDC}")
-            print(f"{Colors.BOLD}{command}{Colors.ENDC}\n")
-
             process = subprocess.Popen(
                 command,
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                universal_newlines=True
+                universal_newlines=True,
+                bufsize=1
             )
 
-            # Mostrar salida en tiempo real
+            # Show real-time output
             while True:
                 output = process.stdout.readline()
                 if output == '' and process.poll() is not None:
@@ -236,42 +192,102 @@ class NmapModule(ToolModule):
                 if output:
                     print(output.strip())
 
-            # Verificar si hubo errores
-            stderr = process.stderr.read()
-            if stderr:
-                print(f"{Colors.FAIL}[!] Errores durante la ejecución:{Colors.ENDC}")
-                print(stderr)
-
-            if process.returncode == 0:
-                print(f"\n{Colors.GREEN}[✓] Escaneo completado exitosamente{Colors.ENDC}")
+            # Check for errors
+            if process.returncode != 0:
+                stderr = process.stderr.read()
+                if stderr:
+                    print(f"{Colors.FAIL}[!] Errors during scan:{Colors.ENDC}")
+                    print(stderr)
             else:
-                print(f"\n{Colors.FAIL}[!] El escaneo terminó con errores{Colors.ENDC}")
+                print(f"\n{Colors.GREEN}[✓] Scan completed successfully{Colors.ENDC}")
 
-        except subprocess.SubprocessError as e:
-            print(f"{Colors.FAIL}[!] Error ejecutando Nmap: {e}{Colors.ENDC}")
         except KeyboardInterrupt:
-            print(f"\n{Colors.WARNING}[!] Escaneo interrumpido por el usuario{Colors.ENDC}")
-            if 'process' in locals():
-                process.terminate()
+            print(f"\n{Colors.WARNING}[!] Scan interrupted by user{Colors.ENDC}")
+            process.terminate()
+        except Exception as e:
+            print(f"{Colors.FAIL}[!] Error during scan: {e}{Colors.ENDC}")
+
+    def run_guided(self) -> None:
+        """Interactive guided mode for nmap"""
+        self._show_banner()
+
+        try:
+            # Get target
+            target = self._get_target()
+            if not target:
+                return
+
+            # Get scan profile
+            profile = self._get_scan_profile()
+            
+            # For custom scan, get additional options
+            if not profile:
+                print(f"\n{Colors.CYAN}[*] Common Options:{Colors.ENDC}")
+                print("  -sS: TCP SYN scan")
+                print("  -sV: Version detection")
+                print("  -O:  OS detection")
+                print("  -A:  Aggressive scan")
+                print("  -T4: Faster timing")
+                profile = input(f"\n{Colors.BOLD}[+] Enter custom options: {Colors.ENDC}").strip()
+
+            # Get output options
+            output_opts = self._get_output_options()
+
+            # Build and execute command
+            command = f"sudo nmap {profile} {output_opts} {target}"
+            
+            print(f"\n{Colors.CYAN}[*] Executing scan:{Colors.ENDC}")
+            print(f"{Colors.BOLD}{command}{Colors.ENDC}\n")
+
+            self._execute_scan(command)
+
+        except KeyboardInterrupt:
+            print(f"\n{Colors.WARNING}[!] Operation cancelled by user{Colors.ENDC}")
 
     def run_direct(self) -> None:
-        """Modo directo mejorado para Nmap"""
+        """Direct command execution mode for nmap"""
         self._show_banner()
-        print(f"\n{Colors.CYAN}[*] Modo directo - Ingresa comando Nmap completo{Colors.ENDC}")
-        print(f"{Colors.CYAN}[*] Ejemplo: nmap -sS -sV -O <objetivo>{Colors.ENDC}")
-        print(f"{Colors.CYAN}[*] Escribe 'exit' para volver al menú principal{Colors.ENDC}")
+        
+        print(f"\n{Colors.CYAN}[*] Direct Mode - Enter nmap commands directly{Colors.ENDC}")
+        print(f"{Colors.CYAN}[*] Example commands:{Colors.ENDC}")
+        print("  • nmap -sS -sV target")
+        print("  • nmap -A -T4 target")
+        print("  • nmap -p- -sV target")
+        print("  • nmap --script vuln target")
+        print(f"\n{Colors.CYAN}[*] Type 'examples' for more examples, 'help' for options, or 'exit' to quit{Colors.ENDC}")
 
         while True:
             try:
                 command = input(f"\n{Colors.BOLD}nmap > {Colors.ENDC}").strip()
+                
                 if not command:
                     continue
                 if command.lower() == 'exit':
                     break
-                if command:
-                    if not command.startswith('nmap '):
-                        command = f"nmap {command}"
-                    self.execute_command(command)
+                if command.lower() == 'help':
+                    subprocess.run(['nmap', '--help'])
+                    continue
+                if command.lower() == 'examples':
+                    print(f"\n{Colors.CYAN}[*] Common Examples:{Colors.ENDC}")
+                    print("1. Quick scan of top ports:")
+                    print("   nmap -T4 --top-ports 100 target")
+                    print("\n2. Detailed scan with version detection:")
+                    print("   nmap -sS -sV -T4 target")
+                    print("\n3. Full vulnerability scan:")
+                    print("   nmap -sV --script vuln target")
+                    print("\n4. Comprehensive system audit:")
+                    print("   nmap -sS -sV -O -A -T4 target")
+                    print("\n5. Stealth scan:")
+                    print("   nmap -sS -T2 target")
+                    continue
+
+                if not command.startswith('nmap '):
+                    command = f"nmap {command}"
+                if not command.startswith('sudo '):
+                    command = f"sudo {command}"
+
+                self._execute_scan(command)
+
             except KeyboardInterrupt:
                 print("\n")
-                break
+                continue

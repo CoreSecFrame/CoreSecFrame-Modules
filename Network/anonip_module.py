@@ -6,7 +6,9 @@ from pathlib import Path
 
 class AnonIPModule(ToolModule):
     def __init__(self):
-        super().__init__()  # Llamar al inicializador padre después
+        self.repo_url = "https://github.com/sPROFFEs/AnonIP/releases/download/English/AnonIP_ENG.sh"
+        self.scripts_dir = Path(__file__).parent.parent.parent / "scripts" / "Network" / "AnonIP"
+        super().__init__()
 
     def _get_name(self) -> str:
         return "anonip"
@@ -24,7 +26,8 @@ class AnonIPModule(ToolModule):
         return ["tor", "wget", "iptables"]
 
     def _get_script_path(self) -> str:
-        return str(Path(__file__).parent.parent / "modules" / "scripts" / "anonip.sh")
+        """Returns path to script"""
+        return str(self.scripts_dir / "anonip.sh")
 
     def _get_update_command(self, pkg_manager: str) -> str:
         commands = {
@@ -35,57 +38,56 @@ class AnonIPModule(ToolModule):
         }
         return commands.get(pkg_manager, '')
 
-    def _get_install_command(self, pkg_manager: str) -> str:
-        base_script_path = Path(__file__).parent.parent / "modules" / "scripts"
-        script_url = "https://github.com/sPROFFEs/AnonIP/releases/download/English/AnonIP_ENG.sh"
+    def _get_install_command(self, pkg_manager: str) -> List[str]:
+        """Returns installation commands for different package managers"""
+        
+        # Create category-specific scripts directory
+        self.scripts_dir.mkdir(parents=True, exist_ok=True)
+        script_path = self.scripts_dir / "anonip.sh"
         
         commands = {
-            'apt': f"""
-                sudo apt-get update && 
-                sudo apt-get install -y tor wget iptables &&
-                mkdir -p {base_script_path} &&
-                wget -O {base_script_path}/anonip.sh {script_url} &&
-                chmod +x {base_script_path}/anonip.sh
-            """,
-            'yum': f"""
-                sudo yum update -y &&
-                sudo yum install -y tor wget dhclient iptables &&
-                mkdir -p {base_script_path} &&
-                wget -O {base_script_path}/anonip.sh {script_url} &&
-                chmod +x {base_script_path}/anonip.sh
-            """,
-            'pacman': f"""
-                sudo pacman -Sy &&
-                sudo pacman -S tor wget dhclient iptables &&
-                mkdir -p {base_script_path} &&
-                wget -O {base_script_path}/anonip.sh {script_url} &&
-                chmod +x {base_script_path}/anonip.sh
-            """
+            'apt': [
+                "sudo apt-get update",
+                "sudo apt-get install -y tor wget iptables",
+                f"wget -O {script_path} {self.repo_url}",
+                f"chmod +x {script_path}"
+            ],
+            'yum': [
+                "sudo yum update",
+                "sudo yum install -y tor wget dhclient iptables",
+                f"wget -O {script_path} {self.repo_url}",
+                f"chmod +x {script_path}"
+            ],
+            'pacman': [
+                "sudo pacman -Sy",
+                "sudo pacman -S tor wget dhclient iptables --noconfirm",
+                f"wget -O {script_path} {self.repo_url}",
+                f"chmod +x {script_path}"
+            ]
         }
-        return commands.get(pkg_manager, '')
+        return commands.get(pkg_manager, [])
 
     def _get_uninstall_command(self, pkg_manager: str) -> str:
-        base_script_path = Path(__file__).parent.parent / "modules" / "scripts"
-        
+        script_path = self.scripts_dir / "anonip.sh"        
         commands = {
             'apt': f"""
                 sudo systemctl stop tor &&
                 sudo systemctl disable tor &&
                 sudo apt-get autoremove -y &&
-                rm -f {base_script_path}/anonip.sh
+                rm -f {script_path}
             """,
             'yum': f"""
                 sudo systemctl stop tor &&
                 sudo systemctl disable tor &&
                 sudo yum remove -y tor  &&
                 sudo yum autoremove -y &&
-                rm -f {base_script_path}/anonip.sh
+                rm -f {script_path}
             """,
             'pacman': f"""
                 sudo systemctl stop tor &&
                 sudo systemctl disable tor &&
                 sudo pacman -R tor &&
-                rm -f {base_script_path}/anonip.sh
+                rm -f {script_path}
             """
         }
         return commands.get(pkg_manager, '')

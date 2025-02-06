@@ -3,6 +3,7 @@ import subprocess
 import os
 import shutil
 from pathlib import Path
+from typing import List, Dict, Optional
 
 class AnonIPModule(ToolModule):
     def __init__(self):

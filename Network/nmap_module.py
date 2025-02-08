@@ -172,8 +172,13 @@ class NmapModule(ToolModule):
 
         return " ".join(options)
 
-    def _execute_scan(self, command: str) -> None:
-        """Execute nmap scan with real-time output"""
+    def _execute_scan(self, command: str) -> bool:
+        """
+        Execute nmap scan with real-time output
+        
+        Returns:
+            bool: True if user wants to perform another scan, False otherwise
+        """
         try:
             process = subprocess.Popen(
                 command,
@@ -201,48 +206,61 @@ class NmapModule(ToolModule):
             else:
                 print(f"\n{Colors.GREEN}[✓] Scan completed successfully{Colors.ENDC}")
 
+            # Ask user if they want to perform another scan
+            while True:
+                choice = input(f"\n{Colors.BOLD}[?] Would you like to perform another scan? (y/N): {Colors.ENDC}").lower()
+                if choice in ['y', 'n', '']:
+                    return choice == 'y'
+                print(f"{Colors.FAIL}[!] Please enter 'y' for yes or 'n' for no{Colors.ENDC}")
+
         except KeyboardInterrupt:
             print(f"\n{Colors.WARNING}[!] Scan interrupted by user{Colors.ENDC}")
             process.terminate()
+            return False
         except Exception as e:
             print(f"{Colors.FAIL}[!] Error during scan: {e}{Colors.ENDC}")
+            return False
 
     def run_guided(self) -> None:
         """Interactive guided mode for nmap"""
         self._show_banner()
 
-        try:
-            # Get target
-            target = self._get_target()
-            if not target:
-                return
+        while True:
+            try:
+                # Get target
+                target = self._get_target()
+                if not target:
+                    return
 
-            # Get scan profile
-            profile = self._get_scan_profile()
-            
-            # For custom scan, get additional options
-            if not profile:
-                print(f"\n{Colors.CYAN}[*] Common Options:{Colors.ENDC}")
-                print("  -sS: TCP SYN scan")
-                print("  -sV: Version detection")
-                print("  -O:  OS detection")
-                print("  -A:  Aggressive scan")
-                print("  -T4: Faster timing")
-                profile = input(f"\n{Colors.BOLD}[+] Enter custom options: {Colors.ENDC}").strip()
+                # Get scan profile
+                profile = self._get_scan_profile()
+                
+                # For custom scan, get additional options
+                if not profile:
+                    print(f"\n{Colors.CYAN}[*] Common Options:{Colors.ENDC}")
+                    print("  -sS: TCP SYN scan")
+                    print("  -sV: Version detection")
+                    print("  -O:  OS detection")
+                    print("  -A:  Aggressive scan")
+                    print("  -T4: Faster timing")
+                    profile = input(f"\n{Colors.BOLD}[+] Enter custom options: {Colors.ENDC}").strip()
 
-            # Get output options
-            output_opts = self._get_output_options()
+                # Get output options
+                output_opts = self._get_output_options()
 
-            # Build and execute command
-            command = f"sudo nmap {profile} {output_opts} {target}"
-            
-            print(f"\n{Colors.CYAN}[*] Executing scan:{Colors.ENDC}")
-            print(f"{Colors.BOLD}{command}{Colors.ENDC}\n")
+                # Build and execute command
+                command = f"sudo nmap {profile} {output_opts} {target}"
+                
+                print(f"\n{Colors.CYAN}[*] Executing scan:{Colors.ENDC}")
+                print(f"{Colors.BOLD}{command}{Colors.ENDC}\n")
 
-            self._execute_scan(command)
+                # Execute scan and check if user wants to continue
+                if not self._execute_scan(command):
+                    break
 
-        except KeyboardInterrupt:
-            print(f"\n{Colors.WARNING}[!] Operation cancelled by user{Colors.ENDC}")
+            except KeyboardInterrupt:
+                print(f"\n{Colors.WARNING}[!] Operation cancelled by user{Colors.ENDC}")
+                break
 
     def run_direct(self) -> None:
         """Direct command execution mode for nmap"""
@@ -286,7 +304,9 @@ class NmapModule(ToolModule):
                 if not command.startswith('sudo '):
                     command = f"sudo {command}"
 
-                self._execute_scan(command)
+                # Execute scan and check if user wants to continue
+                if not self._execute_scan(command):
+                    break
 
             except KeyboardInterrupt:
                 print("\n")

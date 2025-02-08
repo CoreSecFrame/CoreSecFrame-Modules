@@ -229,8 +229,13 @@ class JohnModule(ToolModule):
                 return f"--format={formats[choice]}" if choice != "8" else ""
             print(f"{Colors.FAIL}[!] Invalid choice{Colors.ENDC}")
 
-    def _execute_john(self, command: str) -> None:
-        """Execute john with real-time output"""
+    def _execute_john(self, command: str) -> bool:
+        """
+        Execute john with real-time output
+        
+        Returns:
+            bool: True if user wants to perform another operation, False otherwise
+        """
         try:
             process = subprocess.Popen(
                 command,
@@ -264,116 +269,131 @@ class JohnModule(ToolModule):
                     print(f"\n{Colors.CYAN}[*] Cracked passwords:{Colors.ENDC}")
                     subprocess.run(f"john --show {hash_file}", shell=True)
 
+            # Ask user if they want to perform another operation
+            while True:
+                choice = input(f"\n{Colors.BOLD}[?] Would you like to perform another operation? (y/N): {Colors.ENDC}").lower()
+                if choice in ['y', 'n', '']:
+                    return choice == 'y'
+                print(f"{Colors.FAIL}[!] Please enter 'y' for yes or 'n' for no{Colors.ENDC}")
+
         except KeyboardInterrupt:
             print(f"\n{Colors.WARNING}[!] Operation interrupted by user{Colors.ENDC}")
             print(f"{Colors.CYAN}[*] You can restore this session later using --restore{Colors.ENDC}")
             process.terminate()
+            return False
         except Exception as e:
             print(f"{Colors.FAIL}[!] Error during execution: {e}{Colors.ENDC}")
+            return False
+
 
     def run_guided(self) -> None:
         """Interactive guided mode for john"""
         self._show_banner()
 
-        try:
-            # Step 1: Initialize attack
-            print(f"\n{Colors.CYAN}[*] Attack Configuration{Colors.ENDC}")
-            print(f"{Colors.CYAN}=" * 30)
+        while True:
+            try:
+                # Step 1: Initialize attack
+                print(f"\n{Colors.CYAN}[*] Attack Configuration{Colors.ENDC}")
+                print(f"{Colors.CYAN}=" * 30)
 
-            # Step 2: Get hash file
-            print(f"\n{Colors.CYAN}[*] Step 1: Select Hash File{Colors.ENDC}")
-            hash_file = self._get_hash_file()
-            if not hash_file:
-                return
+                # Step 2: Get hash file
+                print(f"\n{Colors.CYAN}[*] Step 1: Select Hash File{Colors.ENDC}")
+                hash_file = self._get_hash_file()
+                if not hash_file:
+                    return
 
-            # Step 3: Choose attack type
-            print(f"\n{Colors.CYAN}[*] Step 2: Select Attack Method{Colors.ENDC}")
-            profiles = {
-                "1": ("Basic Wordlist", "--wordlist=", "Dictionary attack with common passwords"),
-                "2": ("Advanced Wordlist", "--wordlist= --rules", "Dictionary attack with word mangling"),
-                "3": ("Targeted Bruteforce", "--mask=?a?a?a?a?a", "Fixed-length character combinations"),
-                "4": ("Full Bruteforce", "--incremental", "Try all possible combinations"),
-                "5": ("Quick Check", "--wordlist= --rules=NT", "Fast check with basic ruleset"),
-                "6": ("Show Results", "--show", "Display cracked passwords"),
-                "7": ("Custom Attack", "", "Define custom options")
-            }
+                # Step 3: Choose attack type
+                print(f"\n{Colors.CYAN}[*] Step 2: Select Attack Method{Colors.ENDC}")
+                profiles = {
+                    "1": ("Basic Wordlist", "--wordlist=", "Dictionary attack with common passwords"),
+                    "2": ("Advanced Wordlist", "--wordlist= --rules", "Dictionary attack with word mangling"),
+                    "3": ("Targeted Bruteforce", "--mask=?a?a?a?a?a", "Fixed-length character combinations"),
+                    "4": ("Full Bruteforce", "--incremental", "Try all possible combinations"),
+                    "5": ("Quick Check", "--wordlist= --rules=NT", "Fast check with basic ruleset"),
+                    "6": ("Show Results", "--show", "Display cracked passwords"),
+                    "7": ("Custom Attack", "", "Define custom options")
+                }
 
-            for key, (name, _, desc) in profiles.items():
-                print(f"{Colors.GREEN}{key}:{Colors.ENDC} {name}")
-                print(f"   {Colors.SUBTLE}{desc}{Colors.ENDC}")
+                for key, (name, _, desc) in profiles.items():
+                    print(f"{Colors.GREEN}{key}:{Colors.ENDC} {name}")
+                    print(f"   {Colors.SUBTLE}{desc}{Colors.ENDC}")
 
-            while True:
-                choice = input(f"\n{Colors.BOLD}[+] Select attack (1-7): {Colors.ENDC}").strip()
-                if choice in profiles:
-                    profile_name, profile_opts = profiles[choice][0:2]
-                    break
-                print(f"{Colors.FAIL}[!] Invalid choice{Colors.ENDC}")
+                while True:
+                    choice = input(f"\n{Colors.BOLD}[+] Select attack (1-7): {Colors.ENDC}").strip()
+                    if choice in profiles:
+                        profile_name, profile_opts = profiles[choice][0:2]
+                        break
+                    print(f"{Colors.FAIL}[!] Invalid choice{Colors.ENDC}")
 
-            # Step 4: Configure attack
-            command_parts = ["john"]
-            
-            if profile_name == "Show Results":
-                command_parts.extend(["--show", hash_file])
-            else:
-                # Format selection
-                print(f"\n{Colors.CYAN}[*] Step 3: Hash Format Configuration{Colors.ENDC}")
-                if input(f"{Colors.BOLD}[+] Would you like to specify the hash format? (y/N): {Colors.ENDC}").lower() == 'y':
-                    format_opt = self._handle_format_selection()
-                    if format_opt:
-                        command_parts.append(format_opt)
+                # Step 4: Configure attack
+                command_parts = ["john"]
+                
+                if profile_name == "Show Results":
+                    command_parts.extend(["--show", hash_file])
+                else:
+                    # Format selection
+                    print(f"\n{Colors.CYAN}[*] Step 3: Hash Format Configuration{Colors.ENDC}")
+                    if input(f"{Colors.BOLD}[+] Would you like to specify the hash format? (y/N): {Colors.ENDC}").lower() == 'y':
+                        format_opt = self._handle_format_selection()
+                        if format_opt:
+                            command_parts.append(format_opt)
 
-                # Wordlist selection for dictionary-based attacks
-                if "wordlist" in profile_opts:
-                    print(f"\n{Colors.CYAN}[*] Step 4: Wordlist Selection{Colors.ENDC}")
-                    wordlist = self._get_wordlist()
-                    if not wordlist:
-                        return
-                    command_parts.append(f"--wordlist={wordlist}")
+                    # Wordlist selection for dictionary-based attacks
+                    if "wordlist" in profile_opts:
+                        print(f"\n{Colors.CYAN}[*] Step 4: Wordlist Selection{Colors.ENDC}")
+                        wordlist = self._get_wordlist()
+                        if not wordlist:
+                            return
+                        command_parts.append(f"--wordlist={wordlist}")
 
-                # Rules and additional options
-                if profile_name not in ["Show Results", "Full Bruteforce"]:
-                    print(f"\n{Colors.CYAN}[*] Step 5: Additional Options{Colors.ENDC}")
-                    
-                    if "rules" not in profile_opts and input(f"{Colors.BOLD}[+] Enable word mangling rules? (y/N): {Colors.ENDC}").lower() == 'y':
-                        command_parts.append("--rules")
+                    # Rules and additional options
+                    if profile_name not in ["Show Results", "Full Bruteforce"]:
+                        print(f"\n{Colors.CYAN}[*] Step 5: Additional Options{Colors.ENDC}")
+                        
+                        if "rules" not in profile_opts and input(f"{Colors.BOLD}[+] Enable word mangling rules? (y/N): {Colors.ENDC}").lower() == 'y':
+                            command_parts.append("--rules")
 
-                    if input(f"{Colors.BOLD}[+] Save session for later resumption? (y/N): {Colors.ENDC}").lower() == 'y':
-                        session_name = input(f"{Colors.BOLD}[+] Enter session name: {Colors.ENDC}").strip() or "john_session"
-                        command_parts.append(f"--session={session_name}")
+                        if input(f"{Colors.BOLD}[+] Save session for later resumption? (y/N): {Colors.ENDC}").lower() == 'y':
+                            session_name = input(f"{Colors.BOLD}[+] Enter session name: {Colors.ENDC}").strip() or "john_session"
+                            command_parts.append(f"--session={session_name}")
 
-                # Custom options
-                if profile_name == "Custom Attack":
-                    print(f"\n{Colors.CYAN}[*] Available Options:{Colors.ENDC}")
-                    print("  --rules=RULESET   Specify rule set (eg: NT, Extra, All)")
-                    print("  --incremental     Enable brute-force mode")
-                    print("  --mask=?a?a?a     Define character pattern")
-                    print("  --session=name    Save session for recovery")
-                    print("  --fork=N          Enable parallel processing")
-                    
-                    custom_opts = input(f"\n{Colors.BOLD}[+] Enter additional options: {Colors.ENDC}").strip()
-                    if custom_opts:
-                        command_parts.extend(custom_opts.split())
+                    # Custom options
+                    if profile_name == "Custom Attack":
+                        print(f"\n{Colors.CYAN}[*] Available Options:{Colors.ENDC}")
+                        print("  --rules=RULESET   Specify rule set (eg: NT, Extra, All)")
+                        print("  --incremental     Enable brute-force mode")
+                        print("  --mask=?a?a?a     Define character pattern")
+                        print("  --session=name    Save session for recovery")
+                        print("  --fork=N          Enable parallel processing")
+                        
+                        custom_opts = input(f"\n{Colors.BOLD}[+] Enter additional options: {Colors.ENDC}").strip()
+                        if custom_opts:
+                            command_parts.extend(custom_opts.split())
 
-                # Add hash file as final argument
-                command_parts.append(hash_file)
+                    # Add hash file as final argument
+                    command_parts.append(hash_file)
 
-            # Step 5: Execute attack
-            command = " ".join(command_parts)
-            print(f"\n{Colors.CYAN}[*] Attack Summary{Colors.ENDC}")
-            print(f"{Colors.CYAN}=" * 30)
-            print(f"Attack Type: {profile_name}")
-            print(f"Target File: {hash_file}")
-            print(f"Command: {command}")
+                # Step 5: Execute attack
+                command = " ".join(command_parts)
+                print(f"\n{Colors.CYAN}[*] Attack Summary{Colors.ENDC}")
+                print(f"{Colors.CYAN}=" * 30)
+                print(f"Attack Type: {profile_name}")
+                print(f"Target File: {hash_file}")
+                print(f"Command: {command}")
 
-            if input(f"\n{Colors.BOLD}[+] Start attack? (Y/n): {Colors.ENDC}").lower() != 'n':
-                print(f"\n{Colors.CYAN}[*] Executing attack...{Colors.ENDC}")
-                self._execute_john(command)
-            else:
-                print(f"\n{Colors.WARNING}[!] Attack cancelled by user{Colors.ENDC}")
+                if input(f"\n{Colors.BOLD}[+] Start attack? (Y/n): {Colors.ENDC}").lower() != 'n':
+                    print(f"\n{Colors.CYAN}[*] Executing attack...{Colors.ENDC}")
+                    if not self._execute_john(command):
+                        break
+                else:
+                    print(f"\n{Colors.WARNING}[!] Attack cancelled by user{Colors.ENDC}")
+                    if input(f"\n{Colors.BOLD}[?] Would you like to configure another attack? (y/N): {Colors.ENDC}").lower() != 'y':
+                        break
 
-        except KeyboardInterrupt:
-            print(f"\n{Colors.WARNING}[!] Operation cancelled by user{Colors.ENDC}")
-            print(f"{Colors.CYAN}[*] You can restore an interrupted session using --restore{Colors.ENDC}")
+            except KeyboardInterrupt:
+                print(f"\n{Colors.WARNING}[!] Operation cancelled by user{Colors.ENDC}")
+                print(f"{Colors.CYAN}[*] You can restore an interrupted session using --restore{Colors.ENDC}")
+                break
 
     def run_direct(self) -> None:
         """Direct command execution mode for john"""
@@ -396,13 +416,13 @@ class JohnModule(ToolModule):
                     
                 if command.lower() == 'exit':
                     break
-                    
+                        
                 elif command.lower() == 'help':
                     subprocess.run(['john', '--help=1'])
-                    
+                        
                 elif command.lower() == 'formats':
                     subprocess.run(['john', '--list=formats'])
-                    
+                        
                 elif command.lower() == 'status':
                     # First check if there's an active session
                     result = subprocess.run(['john', '--status'], capture_output=True, text=True)
@@ -410,47 +430,47 @@ class JohnModule(ToolModule):
                         print(f"{Colors.WARNING}[!] No active session found{Colors.ENDC}")
                     else:
                         print(result.stdout)
-                    
+                        
                 elif command.lower() == 'examples':
                     print(f"\n{Colors.CYAN}[*] Common Usage Examples:{Colors.ENDC}")
                     print(f"\n{Colors.GREEN}1. Basic Wordlist Attack{Colors.ENDC}")
                     print("Description: Simple dictionary attack using a wordlist")
                     print("Command: john --wordlist=/usr/share/wordlists/rockyou.txt hash.txt")
-                    
+                        
                     print(f"\n{Colors.GREEN}2. Wordlist with Rules{Colors.ENDC}")
                     print("Description: Dictionary attack with word mangling rules")
                     print("Command: john --wordlist=wordlist.txt --rules hash.txt")
                     print("Command: john --wordlist=wordlist.txt --rules=KoreLogic hash.txt")
-                    
+                        
                     print(f"\n{Colors.GREEN}3. Format-Specific Attack{Colors.ENDC}")
                     print("Description: Attack specifying hash format")
                     print("Command: john --format=raw-md5 hash.txt")
                     print("Command: john --format=bcrypt hash.txt")
-                    
+                        
                     print(f"\n{Colors.GREEN}4. Incremental (Brute-Force) Attack{Colors.ENDC}")
                     print("Description: Try all possible character combinations")
                     print("Command: john --incremental hash.txt")
                     print("Command: john --incremental:Alpha hash.txt")
-                    
+                        
                     print(f"\n{Colors.GREEN}5. Mask Attack{Colors.ENDC}")
                     print("Description: Attack using specific pattern")
                     print("Command: john --mask='?d?d?d?d?d?d' hash.txt  # 6 digits")
                     print("Command: john --mask='?u?l?l?l?d?d' hash.txt  # Upper+3lower+2digits")
-                    
+                        
                     print(f"\n{Colors.GREEN}6. Multiple Attack Modes{Colors.ENDC}")
                     print("Description: Combine different attack methods")
                     print("Command: john --wordlist=wordlist.txt --rules --incremental hash.txt")
-                    
+                        
                     print(f"\n{Colors.GREEN}7. Session Management{Colors.ENDC}")
                     print("Description: Save and restore cracking sessions")
                     print("Command: john --session=mysession hash.txt")
                     print("Command: john --restore=mysession")
-                    
+                        
                     print(f"\n{Colors.GREEN}8. Show Results{Colors.ENDC}")
                     print("Description: Display cracked passwords")
                     print("Command: john --show hash.txt")
                     print("Command: john --show --format=raw-md5 hash.txt")
-                    
+                        
                     print(f"\n{Colors.CYAN}[*] Additional Tips:{Colors.ENDC}")
                     print("• Use --fork=N for parallel processing")
                     print("• Use --list=formats to see supported hash types")
@@ -461,14 +481,15 @@ class JohnModule(ToolModule):
                     # If not a special command, execute as john command
                     if not command.startswith('john '):
                         command = f"john {command}"
-                        
+                            
                     try:
-                        self._execute_john(command)
+                        if not self._execute_john(command):
+                            break
                     except subprocess.CalledProcessError as e:
                         print(f"{Colors.FAIL}[!] Error executing command: {e}{Colors.ENDC}")
                         if e.stderr:
                             print(f"Error details: {e.stderr.decode()}")
-                            
+                                
             except KeyboardInterrupt:
                 print("\n")
                 continue

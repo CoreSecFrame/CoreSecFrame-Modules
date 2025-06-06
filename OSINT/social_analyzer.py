@@ -6,6 +6,46 @@ import shutil
 from pathlib import Path
 from typing import List, Dict, Optional
 
+# Try different import methods
+try:
+    from core.base import ToolModule
+    from core.colors import Colors
+except ImportError:
+    try:
+        from modules.core.base import ToolModule
+        from modules.core.colors import Colors
+    except ImportError:
+        # Create minimal fallback classes if imports fail
+        class ToolModule:
+            def __init__(self):
+                pass
+            def _get_name(self) -> str:
+                return ""
+            def _get_category(self) -> str:
+                return ""
+            def _get_command(self) -> str:
+                return ""
+            def _get_description(self) -> str:
+                return ""
+            def _get_dependencies(self) -> List[str]:
+                return []
+            def check_installation(self) -> bool:
+                return False
+            def run_guided(self) -> None:
+                pass
+            def run_direct(self) -> None:
+                pass
+            def get_help(self) -> dict:
+                return {}
+        
+        class Colors:
+            CYAN = '\033[96m'
+            GREEN = '\033[92m'
+            WARNING = '\033[93m'
+            FAIL = '\033[91m'
+            ENDC = '\033[0m'
+            BOLD = '\033[1m'
+            
 class SocialAnalyzerModule(ToolModule):
     def __init__(self):
         super().__init__()

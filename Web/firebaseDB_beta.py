@@ -281,268 +281,659 @@ class FirebaseScannerModule(ToolModule):
 ''')
 
     def _extract_firebase_config(self, url_or_project: str) -> bool:
-        """Extract Firebase configuration from URL or project ID"""
+        """Enhanced Firebase configuration extraction with multiple detection methods"""
         try:
             if url_or_project.startswith('http'):
-                # Try to extract from URL
-                response = self.session.get(url_or_project, timeout=10)
-                content = response.text
+                # Method 1: Original config extraction from page content
+                if self._extract_firebase_config_from_page(url_or_project):
+                    return True
                 
-                # Look for Firebase config in the page
-                for pattern in self.FIREBASE_CONFIG_PATTERNS:
-                    match = re.search(pattern, content, re.IGNORECASE)
-                    if match:
-                        try:
-                            # Clean up the JSON and parse it
-                            json_str = match.group(1)
-                            json_str = re.sub(r'(\w+):', r'"\1":', json_str)  # Add quotes to keys
-                            json_str = re.sub(r"'", '"', json_str)  # Replace single quotes
-                            
-                            config = json.loads(json_str)
-                            
-                            self.project_id = config.get('projectId')
-                            self.api_key = config.get('apiKey')
-                            self.database_url = config.get('databaseURL')
-                            
-                            if self.project_id:
-                                print(f"{Colors.GREEN}[✓] Firebase config extracted from URL{Colors.ENDC}")
-                                print(f"    Project ID: {self.project_id}") # No color needed for value
-                                return True
-                        except json.JSONDecodeError:
-                            continue # Try next pattern
+                # Method 2: NEW - Network traffic analysis 
+                if self._extract_from_network_requests(url_or_project):
+                    return True
                 
-                # If no config found, try to extract project ID from URL patterns
-                for pattern in self.FIREBASE_PROJECT_ID_URL_PATTERNS:
-                    match = re.search(pattern, url_or_project + content) # Check original url and content
-                    if match:
-                        self.project_id = match.group(1)
-                        print(f"{Colors.GREEN}[✓] Project ID extracted: {self.project_id}{Colors.ENDC}")
-                        return True
-                        
+                # Method 3: NEW - JavaScript source analysis
+                if self._extract_from_javascript_sources(url_or_project):
+                    return True
+                    
             else:
                 # Treat as project ID
                 self.project_id = url_or_project
                 print(f"{Colors.GREEN}[✓] Using project ID: {self.project_id}{Colors.ENDC}")
                 return True
                 
-        except requests.exceptions.RequestException as e: # More specific exception
-            print(f"{Colors.FAIL}[!] Network error extracting Firebase config: {e}{Colors.ENDC}")
-        except Exception as e: # General fallback
+        except Exception as e:
             print(f"{Colors.FAIL}[!] Error extracting Firebase config: {e}{Colors.ENDC}")
             
         return False
 
+    def _extract_firebase_config_from_page(self, url: str) -> bool:
+        """Original method - extract from page HTML/JS"""
+        try:
+            response = self.session.get(url, timeout=10)
+            content = response.text
+            
+            # Look for Firebase config in the page (código original)
+            for pattern in self.FIREBASE_CONFIG_PATTERNS:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    try:
+                        json_str = match.group(1)
+                        json_str = re.sub(r'(\w+):', r'"\1":', json_str)
+                        json_str = re.sub(r"'", '"', json_str)
+                        
+                        config = json.loads(json_str)
+                        
+                        self.project_id = config.get('projectId')
+                        self.api_key = config.get('apiKey')
+                        self.database_url = config.get('databaseURL')
+                        
+                        if self.project_id:
+                            print(f"{Colors.GREEN}[✓] Firebase config extracted from URL{Colors.ENDC}")
+                            print(f"    Project ID: {self.project_id}")
+                            return True
+                    except json.JSONDecodeError:
+                        continue
+            
+            # Try URL patterns if config not found
+            for pattern in self.FIREBASE_PROJECT_ID_URL_PATTERNS:
+                match = re.search(pattern, url + content)
+                if match:
+                    self.project_id = match.group(1)
+                    print(f"{Colors.GREEN}[✓] Project ID extracted: {self.project_id}{Colors.ENDC}")
+                    return True
+                    
+        except Exception as e:
+            print(f"{Colors.FAIL}[!] Error in page extraction: {e}{Colors.ENDC}")
+        return False
+
+    def _extract_from_network_requests(self, base_url: str) -> bool:
+        """NEW - Extract Firebase project info from network patterns (like your HTTP example)"""
+        print(f"{Colors.CYAN}[*] Analyzing network patterns for Firebase services...{Colors.ENDC}")
+        
+        try:
+            response = self.session.get(base_url, timeout=10)
+            if response.status_code != 200:
+                return False
+                
+            content = response.text
+            
+            # NEW: Look for Firestore patterns (like your example)
+            firestore_patterns = [
+                r'database=projects%2F([a-zA-Z0-9\-_]+)%2F',  # URL encoded
+                r'projects[%/]([a-zA-Z0-9\-_]+)[%/]databases',  # General pattern
+                r'/v1/projects/([a-zA-Z0-9\-_]+)/',  # API calls
+                r'google\.firestore\.v1\.Firestore',  # Service detection
+            ]
+            
+            for pattern in firestore_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                if matches:
+                    potential_project_id = matches[0]
+                    if self._validate_project_id(potential_project_id):
+                        self.project_id = potential_project_id
+                        print(f"{Colors.GREEN}[✓] Project ID found via network analysis: {self.project_id}{Colors.ENDC}")
+                        return True
+            
+            # Look for other Firebase patterns
+            project_patterns = [
+                r'"projectId":\s*"([a-zA-Z0-9\-_]+)"',
+                r'projectId["\s]*[:=]["\s]*([a-zA-Z0-9\-_]+)',
+                r'https://([a-zA-Z0-9\-_]+)\.firebaseapp\.com',
+                r'https://([a-zA-Z0-9\-_]+)\.web\.app',
+                r'https://([a-zA-Z0-9\-_]+)-default-rtdb\.firebaseio\.com',
+            ]
+            
+            for pattern in project_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                if matches:
+                    potential_project_id = matches[0]
+                    if self._validate_project_id(potential_project_id):
+                        self.project_id = potential_project_id
+                        print(f"{Colors.GREEN}[✓] Project ID found in source: {self.project_id}{Colors.ENDC}")
+                        return True
+            
+            # Look for API keys
+            api_key_patterns = [
+                r'"apiKey":\s*"(AIza[0-9A-Za-z\-_]{35})"',
+                r'apiKey["\s]*[:=]["\s]*(AIza[0-9A-Za-z\-_]{35})',
+                r'key=(AIza[0-9A-Za-z\-_]{35})',
+            ]
+            
+            for pattern in api_key_patterns:
+                matches = re.findall(pattern, content)
+                if matches:
+                    self.api_key = matches[0]
+                    print(f"{Colors.GREEN}[✓] API key extracted: {self.api_key[:10]}...{Colors.ENDC}")
+            
+        except Exception as e:
+            print(f"{Colors.WARNING}[!] Network analysis error: {e}{Colors.ENDC}")
+        
+        return False
+
+    def _extract_from_javascript_sources(self, base_url: str) -> bool:
+        """NEW - Extract Firebase config from JavaScript files"""
+        print(f"{Colors.CYAN}[*] Analyzing JavaScript sources for Firebase config...{Colors.ENDC}")
+        
+        try:
+            response = self.session.get(base_url, timeout=10)
+            if response.status_code != 200:
+                return False
+                
+            content = response.text
+            
+            # Find JavaScript file references
+            js_patterns = [
+                r'<script[^>]+src=["\']([^"\']+\.js[^"\']*)["\']',
+                r'<script[^>]+src=["\']([^"\']*firebase[^"\']*)["\']',
+            ]
+            
+            js_urls = []
+            for pattern in js_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                js_urls.extend(matches)
+            
+            # Analyze JavaScript files
+            for js_url in js_urls[:5]:  # Limit to first 5 files
+                if not js_url.startswith('http'):
+                    from urllib.parse import urljoin
+                    js_url = urljoin(base_url, js_url)
+                
+                try:
+                    js_response = self.session.get(js_url, timeout=5)
+                    if js_response.status_code == 200:
+                        if self._analyze_javascript_content(js_response.text):
+                            return True
+                except:
+                    continue
+                    
+        except Exception as e:
+            print(f"{Colors.WARNING}[!] JavaScript analysis error: {e}{Colors.ENDC}")
+        
+        return False
+
+    def _analyze_javascript_content(self, content: str) -> bool:
+        """NEW - Analyze JavaScript content for Firebase patterns"""
+        # Look for your specific pattern and others
+        patterns = [
+            r'database=projects%2F([a-zA-Z0-9\-_]+)%2F',  # Your example pattern
+            r'projects[%/]([a-zA-Z0-9\-_]+)[%/]databases',
+            r'projectId\s*[:=]\s*["\']([a-zA-Z0-9\-_]+)["\']',
+            r'firebase\.initializeApp\s*\(\s*({[^}]+})',
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            if matches:
+                if isinstance(matches[0], str):
+                    potential_project = matches[0]
+                else:
+                    potential_project = matches[0][0] if matches[0] else None
+                    
+                if potential_project and self._validate_project_id(potential_project):
+                    self.project_id = potential_project
+                    print(f"{Colors.GREEN}[✓] Project ID found in JavaScript: {self.project_id}{Colors.ENDC}")
+                    return True
+        
+        return False
+
+    def _validate_project_id(self, project_id: str) -> bool:
+        """NEW - Validate if a string looks like a valid Firebase project ID"""
+        if not project_id or len(project_id) < 3 or len(project_id) > 30:
+            return False
+        
+        if not re.match(r'^[a-z0-9\-]+$', project_id):
+            return False
+        
+        if project_id.startswith('-') or project_id.endswith('-'):
+            return False
+        
+        # Common invalid patterns
+        invalid_patterns = ['www', 'http', 'https', 'api', 'test123', 'example']
+        if project_id in invalid_patterns:
+            return False
+        
+        return True
+
     def _test_realtime_database(self) -> List[Dict]:
-        """Test Firebase Realtime Database for security issues"""
+        """Enhanced Realtime Database testing with deeper enumeration"""
         vulnerabilities = []
         
         if not self.project_id:
             return vulnerabilities
-            
-        print(f"\n{Colors.CYAN}[*] Testing Realtime Database...{Colors.ENDC}")
         
-        db_urls = [template.format(project_id=self.project_id) for template in self.RTDB_URL_TEMPLATES]
+        print(f"\n{Colors.CYAN}[*] Enhanced Realtime Database Testing...{Colors.ENDC}")
+        
+        # Expanded list of database URL patterns
+        db_urls = []
+        
+        # Standard patterns
+        for template in self.RTDB_URL_TEMPLATES:
+            db_urls.append(template.format(project_id=self.project_id))
+        
+        # Additional regional patterns often missed
+        additional_regions = [
+            f"https://{self.project_id}-default-rtdb.europe-west1.firebasedatabase.app/",
+            f"https://{self.project_id}-default-rtdb.asia-southeast1.firebasedatabase.app/",
+            f"https://{self.project_id}-default-rtdb.us-central1.firebasedatabase.app/",
+            f"https://{self.project_id}-rtdb.firebaseio.com/",  # Alternative naming
+            f"https://{self.project_id}-prod.firebaseio.com/",  # Production naming
+            f"https://{self.project_id}-dev.firebaseio.com/",   # Development naming
+            f"https://{self.project_id}-staging.firebaseio.com/", # Staging naming
+        ]
+        db_urls.extend(additional_regions)
+        
         if self.database_url:
             db_urls.insert(0, self.database_url.rstrip('/') + '/')
         
+        # MASSIVELY EXPANDED path list - this is where real vulns are found
+        sensitive_paths = [
+            # Root and common collections
+            '', 'users', 'user', 'profiles', 'accounts', 'members',
+            
+            # Admin and configuration
+            'admin', 'admins', 'administrators', 'config', 'configuration', 'settings',
+            'private', 'internal', 'system', 'management', 'dashboard',
+            
+            # Authentication related
+            'auth', 'authentication', 'sessions', 'tokens', 'keys', 'secrets',
+            'passwords', 'credentials', 'login', 'signin', 'oauth',
+            
+            # Business data
+            'orders', 'payments', 'transactions', 'billing', 'invoices',
+            'customers', 'clients', 'contacts', 'leads', 'sales',
+            
+            # Application data
+            'messages', 'chats', 'conversations', 'notifications', 'posts',
+            'comments', 'reviews', 'ratings', 'feedback', 'reports',
+            
+            # File and media
+            'files', 'uploads', 'media', 'images', 'documents', 'attachments',
+            
+            # Analytics and logs
+            'analytics', 'logs', 'events', 'tracking', 'metrics', 'stats',
+            'errors', 'debug', 'monitoring', 'performance',
+            
+            # Development and testing
+            'test', 'tests', 'dev', 'development', 'staging', 'prod', 'production',
+            'backup', 'backups', 'exports', 'imports', 'temp', 'temporary',
+            
+            # API and services
+            'api', 'endpoints', 'services', 'webhooks', 'callbacks',
+            
+            # E-commerce specific
+            'products', 'inventory', 'categories', 'cart', 'wishlist',
+            'discounts', 'coupons', 'promotions',
+            
+            # Social features
+            'friends', 'followers', 'following', 'likes', 'shares', 'votes',
+            
+            # Content management
+            'content', 'articles', 'pages', 'blog', 'news', 'announcements',
+            
+            # Location and mapping
+            'locations', 'places', 'coordinates', 'addresses', 'routes',
+            
+            # Real-time features
+            'realtime', 'live', 'status', 'presence', 'online',
+            
+            # Form data
+            'forms', 'submissions', 'surveys', 'responses', 'feedback',
+            
+            # Security and permissions
+            'permissions', 'roles', 'groups', 'access', 'authorization',
+            
+            # Common naming patterns
+            'data', 'items', 'records', 'entries', 'collection', 'list'
+        ]
+        
         for db_url_base in db_urls:
-            db_url_base_with_slash = db_url_base if db_url_base.endswith('/') else db_url_base + '/'
-            print(f"{Colors.CYAN}[*] Testing database URL: {db_url_base_with_slash}{Colors.ENDC}")
+            db_url_base = db_url_base.rstrip('/') + '/'
+            print(f"{Colors.CYAN}[*] Testing database: {db_url_base}{Colors.ENDC}")
             
-            test_url = f"{db_url_base_with_slash}.json"
-            # Already uses _make_request and _format_vulnerability from previous refactoring attempt
-            response = self._make_request('GET', test_url, timeout=10)
-
-            if not response:
-                continue 
-
-            if response.status_code == 200:
-                content = response.text
-                if content and content.strip().lower() != 'null' and len(content.strip()) > 2:
-                    try:
-                        data = json.loads(content)
-                        data_size = len(str(data)) if data else 0
-                        severity = "CRITICAL" if data_size > 100 else "HIGH"
-                        
-                        vulnerabilities.append(self._format_vulnerability(
-                            type='Open Realtime Database',
-                            severity=severity,
-                            url=db_url_base_with_slash,
-                            description=f'Database allows unauthorized read access ({data_size} chars of data)',
-                            evidence=(content[:297] + '...') if len(content) > 300 else content,
-                            impact='Complete database content exposure without authentication'
-                        ))
-                        print(f"{Colors.FAIL}[!] {severity}: Open database found at {db_url_base_with_slash}{Colors.ENDC}")
-                        print(f"    Data size: {data_size} characters")
-                        
-                        test_data_payload = {'scanner_test': {'timestamp': int(time.time()), 'test': True}}
-                        write_url = f"{db_url_base_with_slash}scanner_test.json"
-                        
-                        write_resp = self._make_request('PUT', write_url, json=test_data_payload['scanner_test'], timeout=5)
-                        if write_resp and write_resp.status_code == 200:
-                            vulnerabilities.append(self._format_vulnerability(
-                                type='Database Write Access',
-                                severity='CRITICAL',
-                                url=write_url,
-                                description='Database allows unauthorized write access',
-                                evidence='Successfully wrote test data',
-                                impact='Data can be modified or deleted without authentication'
-                            ))
-                            print(f"{Colors.FAIL}[!] CRITICAL: Write access confirmed at {write_url}!{Colors.ENDC}")
-                            self._make_request('DELETE', write_url, timeout=3)
-
-                        if isinstance(data, dict):
-                            for path_name in self.COMMON_SENSITIVE_RTDB_PATHS:
-                                if path_name in data:
-                                    path_url = f"{db_url_base_with_slash}{path_name}.json"
-                                    path_resp = self._make_request('GET', path_url, timeout=5)
-                                    if path_resp and path_resp.status_code == 200 and path_resp.text.strip().lower() != 'null':
-                                        path_data_content = path_resp.text
-                                        vulnerabilities.append(self._format_vulnerability(
-                                            type='Sensitive Data Exposure',
-                                            severity='CRITICAL',
-                                            url=path_url,
-                                            description=f'Sensitive path "{path_name}" accessible without auth',
-                                            evidence=(path_data_content[:197] + '...') if len(path_data_content) > 200 else path_data_content,
-                                            impact='Sensitive user data or configuration exposed'
-                                        ))
-                                        print(f"{Colors.FAIL}[!] CRITICAL: Sensitive path '{path_name}' exposed at {path_url}{Colors.ENDC}")
-                        break
-
-                    except json.JSONDecodeError:
-                        if len(content.strip()) > 10:
-                            vulnerabilities.append(self._format_vulnerability(
-                                type='Database Content Exposure',
-                                severity='HIGH',
-                                url=db_url_base_with_slash,
-                                description='Database returns content but not valid JSON',
-                                evidence=(content[:197] + '...') if len(content) > 200 else content,
-                                impact='Database misconfiguration or data corruption'
-                            ))
-                            print(f"{Colors.WARNING}[!] HIGH: Non-JSON content returned from {db_url_base_with_slash}{Colors.ENDC}")
-                else:
-                    print(f"{Colors.GREEN}[✓] Database at {db_url_base_with_slash} exists but appears empty or properly secured (read){Colors.ENDC}")
-            
-            elif response.status_code == 401:
-                print(f"{Colors.GREEN}[✓] Database at {db_url_base_with_slash} properly secured with authentication{Colors.ENDC}")
-                break 
-            elif response.status_code == 404:
-                print(f"{Colors.CYAN}[*] Database not found at {db_url_base_with_slash}{Colors.ENDC}")
-            else:
-                print(f"{Colors.WARNING}[!] Unexpected response {response.status_code} from {db_url_base_with_slash}{Colors.ENDC}")
+            for path in sensitive_paths:
+                test_url = f"{db_url_base}{path}.json"
                 
+                response = self._make_request('GET', test_url, timeout=10)
+                if not response:
+                    continue
+                
+                if response.status_code == 200:
+                    content = response.text
+                    if content and content.strip().lower() != 'null' and len(content.strip()) > 2:
+                        try:
+                            data = json.loads(content)
+                            data_size = len(str(data)) if data else 0
+                            
+                            if data_size > 50:  # Significant data
+                                severity = self._calculate_severity(path, data, data_size)
+                                
+                                vulnerabilities.append(self._format_vulnerability(
+                                    type='Open Realtime Database Path',
+                                    severity=severity,
+                                    url=test_url,
+                                    description=f'Path "{path}" accessible without auth ({data_size} chars)',
+                                    evidence=self._format_evidence(data),
+                                    impact=self._assess_impact(path, data)
+                                ))
+                                
+                                print(f"{Colors.FAIL}[!] {severity}: {path} - {data_size} chars{Colors.ENDC}")
+                                
+                                # Test write access
+                                if self._test_write_access(db_url_base, path):
+                                    vulnerabilities.append(self._format_vulnerability(
+                                        type='Database Write Access',
+                                        severity='CRITICAL',
+                                        url=f"{db_url_base}{path}.json",
+                                        description=f'Path "{path}" allows unauthorized writes',
+                                        evidence='Write test successful',
+                                        impact='Data can be modified or deleted without authentication'
+                                    ))
+                        
+                        except json.JSONDecodeError:
+                            # Still might be valuable non-JSON data
+                            if len(content) > 100:
+                                vulnerabilities.append(self._format_vulnerability(
+                                    type='Database Content Exposure',
+                                    severity='MEDIUM',
+                                    url=test_url,
+                                    description=f'Non-JSON content in path "{path}"',
+                                    evidence=content[:200] + '...' if len(content) > 200 else content,
+                                    impact='Potential data exposure or misconfiguration'
+                                ))
+        
         return vulnerabilities
 
+    def _test_write_access(self, db_base_url: str, path: str) -> bool:
+        """Test if we can write to a database path"""
+        test_data = {
+            'scanner_test': {
+                'timestamp': int(time.time()),
+                'test': True,
+                'note': 'Security scan test - please secure your database'
+            }
+        }
+        
+        write_url = f"{db_base_url}{path}/scanner_test_{int(time.time())}.json"
+        
+        write_resp = self._make_request('PUT', write_url, json=test_data['scanner_test'], timeout=5)
+        if write_resp and write_resp.status_code == 200:
+            # Clean up our test data
+            self._make_request('DELETE', write_url, timeout=3)
+            return True
+        
+        return False
+
+    def _format_evidence(self, data: any) -> str:
+        """Format evidence from data while protecting sensitive info"""
+        data_str = str(data)
+        
+        # Look for interesting patterns without exposing full data
+        patterns = []
+        
+        if 'email' in data_str.lower():
+            patterns.append('Contains email addresses')
+        if 'password' in data_str.lower():
+            patterns.append('Contains password references')
+        if '@' in data_str:
+            patterns.append('Contains email-like strings')
+        if re.search(r'\d{10,}', data_str):
+            patterns.append('Contains long numeric values (possibly phone/ID numbers)')
+        
+        evidence = f"Data size: {len(data_str)} chars"
+        if patterns:
+            evidence += f", Patterns: {', '.join(patterns)}"
+        
+        # Include small sample if not too sensitive
+        if len(data_str) < 500 and not any(word in data_str.lower() for word in ['password', 'secret', 'key']):
+            evidence += f", Sample: {data_str[:100]}..."
+        
+        return evidence
+
+    def _calculate_severity(self, path: str, data: any, data_size: int) -> str:
+        """Calculate vulnerability severity based on path and data content"""
+        # Critical paths
+        critical_indicators = ['admin', 'password', 'secret', 'key', 'token', 'credential', 'private']
+        if any(indicator in path.lower() for indicator in critical_indicators):
+            return 'CRITICAL'
+        
+        # High severity for large datasets or user data
+        if data_size > 10000 or 'user' in path.lower() or 'email' in str(data).lower():
+            return 'HIGH'
+        
+        # Medium for moderate data
+        if data_size > 1000:
+            return 'MEDIUM'
+        
+        return 'LOW'
+
+    def _assess_impact(self, path: str, data: any) -> str:
+        """Assess the impact of exposed data"""
+        data_str = str(data).lower()
+        
+        if any(sensitive in data_str for sensitive in ['password', 'email', 'phone', 'address', 'ssn', 'credit']):
+            return 'PII and sensitive data exposure - potential privacy violations and identity theft'
+        
+        if 'admin' in path.lower() or 'config' in path.lower():
+            return 'Administrative data exposure - potential system compromise'
+        
+        if any(business in data_str for business in ['payment', 'order', 'transaction', 'billing']):
+            return 'Business data exposure - financial and operational impact'
+        
+        return 'General data exposure - potential privacy impact'
+
     def _test_firestore(self) -> List[Dict]:
-        """Test Firestore for security issues"""
+        """Enhanced Firestore testing with collection enumeration"""
         vulnerabilities = []
         
         if not self.project_id:
             return vulnerabilities
-            
-        print(f"\n{Colors.CYAN}[*] Testing Firestore...{Colors.ENDC}")
         
-        firestore_base_url = self.FIRESTORE_BASE_URL_TEMPLATE.format(project_id=self.project_id)
-        # Already uses _make_request and _format_vulnerability
-        response = self._make_request('GET', firestore_base_url, timeout=10)
-
-        if not response:
-            return vulnerabilities
-
-        if response.status_code == 200:
-            vulnerabilities.append(self._format_vulnerability(
-                type='Open Firestore Database',
-                severity='CRITICAL',
-                url=firestore_base_url,
-                description='Firestore allows unauthorized access',
-                evidence=(response.text[:497] + '...') if len(response.text) > 500 else response.text,
-                impact='Complete database access without authentication'
-            ))
-            print(f"{Colors.FAIL}[!] CRITICAL: Open Firestore found at {firestore_base_url}!{Colors.ENDC}")
+        print(f"\n{Colors.CYAN}[*] Enhanced Firestore Testing...{Colors.ENDC}")
+        
+        # Multiple Firestore endpoints to test
+        firestore_endpoints = [
+            f"https://firestore.googleapis.com/v1/projects/{self.project_id}/databases/(default)/documents",
+            f"https://firestore.googleapis.com/v1beta1/projects/{self.project_id}/databases/(default)/documents",
+            f"https://firestore.googleapis.com/v1beta2/projects/{self.project_id}/databases/(default)/documents",
+            f"https://{self.project_id}.firebaseio.com/firestore/documents",  # Alternative endpoint
+        ]
+        
+        # Expanded collection names to test
+        collections_to_test = [
+            # Standard collections
+            'users', 'user', 'profiles', 'accounts', 'members', 'people',
             
-            for collection_name in self.COMMON_FIRESTORE_COLLECTIONS:
-                coll_url = f"{firestore_base_url}/{collection_name}"
-                coll_resp = self._make_request('GET', coll_url, timeout=5)
+            # Admin collections
+            'admin', 'admins', 'administrators', 'config', 'settings', 'system',
+            
+            # Business collections
+            'orders', 'products', 'inventory', 'customers', 'payments', 'transactions',
+            
+            # Content collections
+            'posts', 'articles', 'comments', 'messages', 'notifications', 'chats',
+            
+            # App-specific collections (try variations)
+            'data', 'items', 'records', 'entries', 'content', 'files', 'media',
+            
+            # Development collections
+            'test', 'dev', 'debug', 'logs', 'analytics', 'metrics'
+        ]
+        
+        for base_endpoint in firestore_endpoints:
+            print(f"{Colors.CYAN}[*] Testing Firestore endpoint: {base_endpoint}{Colors.ENDC}")
+            
+            # Test root access
+            response = self._make_request('GET', base_endpoint, timeout=10)
+            if response and response.status_code == 200:
+                vulnerabilities.append(self._format_vulnerability(
+                    type='Open Firestore Database',
+                    severity='CRITICAL',
+                    url=base_endpoint,
+                    description='Firestore allows unauthorized root access',
+                    evidence='HTTP 200 response to root documents endpoint',
+                    impact='Complete database access without authentication'
+                ))
+                
+                # If root is open, try to enumerate actual collections
+                try:
+                    root_data = response.json()
+                    if 'documents' in root_data:
+                        print(f"{Colors.FAIL}[!] CRITICAL: Firestore root accessible with documents!{Colors.ENDC}")
+                except:
+                    pass
+            
+            # Test specific collections
+            for collection in collections_to_test:
+                collection_url = f"{base_endpoint}/{collection}"
+                coll_resp = self._make_request('GET', collection_url, timeout=5)
+                
                 if coll_resp and coll_resp.status_code == 200:
-                    vulnerabilities.append(self._format_vulnerability(
-                        type='Exposed Firestore Collection',
-                        severity='HIGH',
-                        url=coll_url,
-                        description=f'Collection "{collection_name}" is accessible',
-                        evidence=(coll_resp.text[:297] + '...') if len(coll_resp.text) > 300 else coll_resp.text,
-                        impact='Sensitive data exposure'
-                    ))
-                    print(f"{Colors.WARNING}[!] HIGH: Exposed Firestore collection '{collection_name}' at {coll_url}{Colors.ENDC}")
-                    
-        elif response.status_code == 403:
-            print(f"{Colors.GREEN}[✓] Firestore at {firestore_base_url} properly secured{Colors.ENDC}")
-
+                    try:
+                        coll_data = coll_resp.json()
+                        doc_count = len(coll_data.get('documents', []))
+                        
+                        vulnerabilities.append(self._format_vulnerability(
+                            type='Exposed Firestore Collection',
+                            severity='HIGH' if 'admin' in collection or 'user' in collection else 'MEDIUM',
+                            url=collection_url,
+                            description=f'Collection "{collection}" accessible ({doc_count} documents)',
+                            evidence=f'Documents found: {doc_count}',
+                            impact=f'Collection data exposure for "{collection}"'
+                        ))
+                        
+                        print(f"{Colors.WARNING}[!] Collection '{collection}': {doc_count} documents{Colors.ENDC}")
+                        
+                    except json.JSONDecodeError:
+                        # Non-JSON response but still accessible
+                        vulnerabilities.append(self._format_vulnerability(
+                            type='Firestore Collection Access',
+                            severity='MEDIUM',
+                            url=collection_url,
+                            description=f'Collection "{collection}" returns non-JSON data',
+                            evidence=coll_resp.text[:200] + '...' if len(coll_resp.text) > 200 else coll_resp.text,
+                            impact='Potential data exposure or misconfiguration'
+                        ))
+        
         return vulnerabilities
 
     def _test_storage(self) -> List[Dict]:
-        """Test Firebase Storage for security issues"""
+        """Enhanced Firebase Storage testing with deeper enumeration"""
         vulnerabilities = []
         
         if not self.project_id:
             return vulnerabilities
-            
-        print(f"\n{Colors.CYAN}[*] Testing Firebase Storage...{Colors.ENDC}")
         
-        for template in self.STORAGE_URL_TEMPLATES:
-            storage_url = template.format(project_id=self.project_id)
-            print(f"{Colors.CYAN}[*] Testing storage URL: {storage_url}{Colors.ENDC}")
-            # Already uses _make_request and _format_vulnerability
+        print(f"\n{Colors.CYAN}[*] Enhanced Storage Testing...{Colors.ENDC}")
+        
+        # Multiple storage endpoints and naming patterns
+        storage_patterns = [
+            f"https://firebasestorage.googleapis.com/v0/b/{self.project_id}.appspot.com/o",
+            f"https://firebasestorage.googleapis.com/v0/b/{self.project_id}-default.appspot.com/o",
+            f"https://firebasestorage.googleapis.com/v0/b/{self.project_id}-prod.appspot.com/o",
+            f"https://firebasestorage.googleapis.com/v0/b/{self.project_id}-dev.appspot.com/o",
+            f"https://firebasestorage.googleapis.com/v0/b/{self.project_id}-staging.appspot.com/o",
+            f"https://storage.googleapis.com/{self.project_id}.appspot.com",
+            f"https://storage.cloud.google.com/{self.project_id}.appspot.com",
+        ]
+        
+        # Test different file/folder patterns
+        common_paths = [
+            '',  # Root
+            'uploads', 'files', 'documents', 'images', 'media', 'photos',
+            'user-uploads', 'profile-images', 'avatars', 'attachments',
+            'admin', 'private', 'internal', 'config', 'backup', 'exports',
+            'temp', 'cache', 'logs', 'reports', 'data'
+        ]
+        
+        for storage_url in storage_patterns:
+            print(f"{Colors.CYAN}[*] Testing storage: {storage_url}{Colors.ENDC}")
+            
+            # Test root bucket access
             response = self._make_request('GET', storage_url, timeout=10)
-
             if not response:
                 continue
-
+                
             if response.status_code == 200:
                 try:
                     data = response.json()
                     if 'items' in data and data['items']:
+                        file_count = len(data['items'])
                         vulnerabilities.append(self._format_vulnerability(
                             type='Open Firebase Storage',
                             severity='HIGH',
                             url=storage_url,
-                            description='Storage bucket allows unauthorized listing',
-                            evidence=f"Found {len(data['items'])} accessible files",
+                            description=f'Storage bucket allows file listing ({file_count} files)',
+                            evidence=f"Listed {file_count} files in root bucket",
                             impact='File enumeration and potential data exposure'
                         ))
-                        print(f"{Colors.FAIL}[!] HIGH: Open storage found at {storage_url} with {len(data['items'])} files{Colors.ENDC}")
                         
-                        for item in data['items'][:20]: 
-                            file_name = item.get('name', '')
-                            for pattern in self.SENSITIVE_STORAGE_FILE_PATTERNS:
-                                if re.match(pattern, file_name, re.IGNORECASE):
-                                    file_full_url = f"{storage_url.rstrip('/')}/{file_name}"
-                                    vulnerabilities.append(self._format_vulnerability(
-                                        type='Sensitive File Exposure',
-                                        severity='CRITICAL',
-                                        url=file_full_url,
-                                        description=f'Potentially sensitive file: {file_name}',
-                                        evidence=f'File pattern matches: {pattern}',
-                                        impact='Potential credentials or configuration exposure'
-                                    ))
-                                    print(f"{Colors.FAIL}[!] CRITICAL: Sensitive file '{file_name}' found in storage at {file_full_url}{Colors.ENDC}")
-                                    break 
-                                    
+                        print(f"{Colors.FAIL}[!] HIGH: {file_count} files listed in storage{Colors.ENDC}")
+                        
+                        # Analyze files for sensitive content
+                        self._analyze_storage_files(data['items'], storage_url, vulnerabilities)
+                        
                 except json.JSONDecodeError:
-                    # This case means the response was 200, but not JSON. Could be an HTML listing or other non-JSON data.
-                    vulnerabilities.append(self._format_vulnerability(
-                        type='Accessible Storage (Non-JSON)',
-                        severity='MEDIUM', # Potentially less severe than open JSON listing, but needs review
-                        url=storage_url,
-                        description='Storage bucket accessible, but content is not standard JSON listing (e.g., HTML directory listing or single file).',
-                        evidence=(response.text[:197] + '...') if len(response.text) > 200 else response.text,
-                        impact='Potential file exposure or misconfiguration. Requires manual review.'
-                    ))
-                    print(f"{Colors.WARNING}[!] MEDIUM: Storage at {storage_url} returned non-JSON content (HTTP 200). Manual review suggested.{Colors.ENDC}")
+                    # Non-JSON but accessible
+                    if len(response.text) > 100:
+                        vulnerabilities.append(self._format_vulnerability(
+                            type='Storage Bucket Access',
+                            severity='MEDIUM',
+                            url=storage_url,
+                            description='Storage bucket returns non-JSON content',
+                            evidence=response.text[:200] + '...',
+                            impact='Storage misconfiguration or alternative listing format'
+                        ))
+            
+            # Test specific paths
+            for path in common_paths:
+                if path:
+                    path_url = f"{storage_url}/{path}" if storage_url.endswith('/o') else f"{storage_url}/{path}"
+                    path_resp = self._make_request('GET', path_url, timeout=5)
                     
-            elif response.status_code == 403:
-                print(f"{Colors.GREEN}[✓] Storage at {storage_url} properly secured{Colors.ENDC}")
-                
+                    if path_resp and path_resp.status_code == 200:
+                        vulnerabilities.append(self._format_vulnerability(
+                            type='Exposed Storage Path',
+                            severity='MEDIUM' if path in ['admin', 'private', 'config'] else 'LOW',
+                            url=path_url,
+                            description=f'Storage path "{path}" is accessible',
+                            evidence=f'Path returned HTTP 200: {path}',
+                            impact=f'Files in "{path}" directory may be exposed'
+                        ))
+        
         return vulnerabilities
+
+    def _analyze_storage_files(self, files: list, base_url: str, vulnerabilities: list):
+        """Analyze storage files for sensitive content"""
+        for file_item in files[:50]:  # Limit analysis
+            file_name = file_item.get('name', '')
+            file_size = file_item.get('size', 0)
+            
+            # Check for sensitive file patterns
+            sensitive_patterns = [
+                (r'.*\.(key|pem|p12|pfx)$', 'CRITICAL', 'Cryptographic key file'),
+                (r'.*\.(json|xml|yaml|yml)$', 'HIGH', 'Configuration file'),
+                (r'.*\.(sql|db|sqlite)$', 'HIGH', 'Database file'),
+                (r'.*\.(log|txt)$', 'MEDIUM', 'Log or text file'),
+                (r'.*(config|secret|private|admin|backup|dump).*', 'HIGH', 'Sensitive naming pattern'),
+                (r'.*\.(zip|tar|rar|7z)$', 'MEDIUM', 'Archive file'),
+            ]
+            
+            for pattern, severity, description in sensitive_patterns:
+                if re.match(pattern, file_name, re.IGNORECASE):
+                    file_url = f"{base_url}/{file_name}" if not base_url.endswith('/') else f"{base_url}{file_name}"
+                    
+                    vulnerabilities.append(self._format_vulnerability(
+                        type='Sensitive File Exposure',
+                        severity=severity,
+                        url=file_url,
+                        description=f'{description}: {file_name}',
+                        evidence=f'File: {file_name}, Size: {file_size} bytes',
+                        impact='Potential sensitive data or credentials exposure'
+                    ))
+                    
+                    print(f"{Colors.FAIL}[!] {severity}: Sensitive file '{file_name}'{Colors.ENDC}")
+                    break
 
     def _test_authentication(self) -> List[Dict]:
         """Test Firebase Authentication for weaknesses"""
@@ -716,40 +1107,121 @@ class FirebaseScannerModule(ToolModule):
         return vulnerabilities
 
     def _test_cloud_functions(self) -> List[Dict]:
-        """Test for exposed Cloud Functions"""
+        """Enhanced Cloud Functions testing with better enumeration"""
         vulnerabilities = []
         
         if not self.project_id:
             return vulnerabilities
-            
-        print(f"\n{Colors.CYAN}[*] Testing Cloud Functions...{Colors.ENDC}")
         
-        for region in self.COMMON_CLOUD_FUNCTION_REGIONS:
-            for func_name in self.COMMON_CLOUD_FUNCTION_NAMES:
-                func_url = self.CLOUD_FUNCTION_URL_TEMPLATE.format(region=region, project_id=self.project_id, func_name=func_name)
+        print(f"\n{Colors.CYAN}[*] Enhanced Cloud Functions Testing...{Colors.ENDC}")
+        
+        # Extended regions list
+        regions = [
+            'us-central1', 'us-east1', 'us-east4', 'us-west1', 'us-west2', 'us-west3', 'us-west4',
+            'europe-west1', 'europe-west2', 'europe-west3', 'europe-west6', 'europe-central2',
+            'asia-east1', 'asia-east2', 'asia-northeast1', 'asia-northeast2', 'asia-northeast3',
+            'asia-south1', 'asia-southeast1', 'asia-southeast2', 'australia-southeast1'
+        ]
+        
+        # Massively expanded function names
+        function_names = [
+            # API endpoints
+            'api', 'app', 'main', 'index', 'handler', 'webhook', 'callback',
+            'graphql', 'rest', 'endpoint', 'gateway', 'proxy',
+            
+            # Authentication
+            'auth', 'login', 'signin', 'signup', 'register', 'verify', 'validate',
+            'authenticate', 'authorize', 'token', 'refresh', 'logout',
+            
+            # User management
+            'user', 'users', 'profile', 'account', 'member', 'customer',
+            'createUser', 'updateUser', 'deleteUser', 'getUser',
+            
+            # Admin functions
+            'admin', 'dashboard', 'manage', 'control', 'system', 'config',
+            'settings', 'maintenance', 'backup', 'restore',
+            
+            # Business logic
+            'order', 'payment', 'checkout', 'purchase', 'transaction',
+            'notification', 'email', 'sms', 'message', 'alert',
+            
+            # Data processing
+            'process', 'sync', 'import', 'export', 'migrate', 'transform',
+            'aggregate', 'analyze', 'report', 'calculate',
+            
+            # File handling
+            'upload', 'download', 'file', 'image', 'document', 'media',
+            'resize', 'compress', 'convert', 'generate',
+            
+            # Development/Testing
+            'test', 'debug', 'dev', 'staging', 'prod', 'hello', 'ping',
+            'health', 'status', 'info', 'version',
+            
+            # Common business functions
+            'search', 'filter', 'sort', 'list', 'get', 'post', 'put', 'delete',
+            'create', 'read', 'update', 'remove', 'fetch', 'send', 'receive'
+        ]
+        
+        found_functions = []
+        
+        for region in regions:
+            print(f"{Colors.CYAN}[*] Testing region: {region}{Colors.ENDC}")
+            
+            for func_name in function_names:
+                func_url = f"https://{region}-{self.project_id}.cloudfunctions.net/{func_name}"
                 
                 response = self._make_request('GET', func_url, timeout=5)
                 if not response:
-                    continue # Error handled in _make_request
-
+                    continue
+                    
                 if response.status_code == 200:
+                    found_functions.append((func_name, region, func_url))
+                    
+                    # Analyze response
+                    content_length = len(response.text)
+                    severity = 'HIGH' if 'admin' in func_name or content_length > 1000 else 'MEDIUM'
+                    
                     vulnerabilities.append(self._format_vulnerability(
                         type='Exposed Cloud Function',
-                        severity='MEDIUM',
+                        severity=severity,
                         url=func_url,
-                        description=f'Cloud function "{func_name}" in region "{region}" is accessible',
-                        evidence=(response.text[:197] + '...') if len(response.text) > 200 else response.text,
-                        impact='Potential unauthorized function execution'
+                        description=f'Function "{func_name}" accessible in {region}',
+                        evidence=f'HTTP 200 response, {content_length} chars',
+                        impact='Unauthorized function execution possible'
                     ))
-                    print(f"{Colors.WARNING}[!] Found function: {func_name} in {region} at {func_url}{Colors.ENDC}")
+                    
+                    print(f"{Colors.WARNING}[!] Found: {func_name} in {region}{Colors.ENDC}")
+                    
+                    # Test with different HTTP methods
+                    self._test_function_methods(func_url, func_name, vulnerabilities)
                     
                 elif response.status_code == 403:
-                    print(f"{Colors.GREEN}[✓] Function {func_name} in {region} at {func_url} properly secured (403).{Colors.ENDC}")
-                elif response.status_code == 404:
-                    print(f"{Colors.CYAN}[*] Function {func_name} in {region} at {func_url} not found (404).{Colors.ENDC}")
-                # Other status codes are not specifically highlighted here but request errors are handled by _make_request.
-                    
+                    # Function exists but access denied - still valuable info
+                    print(f"{Colors.GREEN}[i] Function exists (403): {func_name} in {region}{Colors.ENDC}")
+        
+        if found_functions:
+            print(f"\n{Colors.YELLOW}[!] Found {len(found_functions)} accessible functions{Colors.ENDC}")
+        
         return vulnerabilities
+
+    def _test_function_methods(self, func_url: str, func_name: str, vulnerabilities: list):
+        """Test Cloud Function with different HTTP methods"""
+        methods = ['POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
+        
+        for method in methods:
+            try:
+                response = self._make_request(method, func_url, timeout=3)
+                if response and response.status_code not in [404, 405, 501]:
+                    vulnerabilities.append(self._format_vulnerability(
+                        type='Function Method Access',
+                        severity='MEDIUM',
+                        url=func_url,
+                        description=f'Function "{func_name}" accepts {method} method',
+                        evidence=f'{method} returned {response.status_code}',
+                        impact=f'Function may accept {method} requests for data modification'
+                    ))
+            except:
+                continue
 
     def _test_api_keys(self) -> List[Dict]:
         """Test API key restrictions and validity"""
@@ -2714,104 +3186,188 @@ class FirebaseScannerModule(ToolModule):
         return users
 
     def _extract_from_database(self) -> List[Dict]:
-            """Extract user information from open Firebase databases"""
-            print(f"\n{Colors.CYAN}[*] Extracting Users from Open Databases{Colors.ENDC}")
+        """Enhanced database extraction with better URL construction"""
+        print(f"\n{Colors.CYAN}[*] Extracting Users from Open Databases{Colors.ENDC}")
+        
+        users = []
+        
+        if not self.project_id:
+            print(f"{Colors.WARNING}[!] Project ID needed for database extraction{Colors.ENDC}")
+            return users
+        
+        # Build proper Firebase RTDB URLs using templates
+        db_urls_to_test = []
+        
+        # Use the existing templates but fix the URL construction
+        for template in self.RTDB_URL_TEMPLATES:
+            db_base_url = template.format(project_id=self.project_id)
+            if not db_base_url.endswith('/'):
+                db_base_url += '/'
+            db_urls_to_test.append(db_base_url)
+        
+        # Add specific database URL if known
+        if self.database_url:
+            db_base_url = self.database_url
+            if not db_base_url.endswith('/'):
+                db_base_url += '/'
+            db_urls_to_test.insert(0, db_base_url)
+        
+        # Enhanced paths list
+        paths_to_check = [
+            '.json',  # Root
+            'users.json', 'user.json', 'profiles.json', 'accounts.json',
+            'admin.json', 'config.json', 'settings.json', 'private.json',
+            'data.json', 'content.json', 'items.json', 'records.json',
+            'messages.json', 'chats.json', 'posts.json', 'comments.json',
+            'test.json', 'dev.json', 'debug.json', 'temp.json'
+        ]
+        
+        print(f"{Colors.CYAN}[*] Testing {len(db_urls_to_test)} database URLs with {len(paths_to_check)} paths each{Colors.ENDC}")
+        
+        for db_base_url in db_urls_to_test:
+            print(f"\n{Colors.CYAN}[*] Testing database: {db_base_url}{Colors.ENDC}")
             
-            users = []
-            
-            if not self.project_id:
-                print(f"{Colors.WARNING}[!] Project ID needed for database extraction{Colors.ENDC}")
-                return users
-            
-            # Database URLs to try (simplified, assuming project_id is set)
-            db_base_templates_to_check = [
-                template.split("://")[1].split("/")[0] for template in self.RTDB_URL_TEMPLATES # Get base domains
-            ] # Get unique base domains
-            db_base_urls_to_check = list(set([f"https://{domain}" for domain in db_base_templates_to_check]))
-
-
-            if self.database_url: # If specific one is known
-                 db_base_urls_to_check.insert(0, self.database_url.split('.json')[0].rsplit('/', 1)[0]) # Get base from full URL
-
-            # Common user collection paths (as .json endpoints)
-            user_json_paths = [f"/{name}.json" for name in self.COMMON_SENSITIVE_RTDB_PATHS]
-
-
-            for base_url in db_base_urls_to_check:
-                for path_suffix in user_json_paths:
-                    db_url = base_url.rstrip('/') + path_suffix # Ensure one slash
+            for path in paths_to_check:
+                if path.startswith('/'):
+                    path = path[1:]
+                
+                full_url = db_base_url.rstrip('/') + '/' + path
+                
+                try:
+                    print(f"{Colors.CYAN}[*] Checking: {path}{Colors.ENDC}", end=" ")
+                    response = self._make_request('GET', full_url, timeout=8)
                     
-                    try:
-                        print(f"{Colors.CYAN}[*] Checking: {db_url}{Colors.ENDC}")
-                        response = self.session.get(db_url, timeout=10)
+                    if not response:
+                        print(f"{Colors.FAIL}✗{Colors.ENDC}")
+                        continue
+                    
+                    if response.status_code == 200:
+                        content = response.text
                         
-                        if response.status_code == 200:
+                        if content and content.strip().lower() not in ['null', '{}', '[]'] and len(content.strip()) > 2:
                             try:
                                 data = response.json()
                                 
-                                if data and isinstance(data, dict):
-                                    user_count = 0
-                                    current_timestamp = int(time.time())
-                                    
-                                    for key, value in data.items():
-                                        if isinstance(value, dict):
-                                            user_info = {
-                                                # 'extraction_method': 'database_extraction', # Replaced by extraction_source
-                                                'database_url': db_url,
-                                                'database_key': key,
-                                                'raw_data': value,
-                                                'timestamp': current_timestamp,
-                                                'extraction_source': 'database_extraction'
-                                            }
-                                            
-                                            # Extract common fields
-                                            field_mappings = {
-                                                'email': ['email', 'Email', 'mail', 'emailAddress'],
-                                                'name': ['name', 'Name', 'displayName', 'fullName', 'username'],
-                                                'user_id': ['uid', 'id', 'userId', 'user_id', 'localId'],
-                                                'phone': ['phone', 'phoneNumber', 'mobile'],
-                                                'role': ['role', 'Role', 'userRole', 'permissions']
-                                            }
-                                            
-                                            for field, possible_keys in field_mappings.items():
-                                                for key_name in possible_keys:
-                                                    if key_name in value:
-                                                        user_info[field] = value[key_name]
-                                                        break
-                                            
-                                            users.append(user_info) # Still append to the list for overall return
-                                            user_count += 1
-
-                                            # Determine filename identifier
-                                            identifier = user_info.get('user_id') or \
-                                                         user_info.get('email') or \
-                                                         key
-                                            
-                                            if identifier:
-                                                normalized_id = re.sub(r'[^a-zA-Z0-9_.-]', '_', str(identifier))[:50] # Normalize and truncate
-                                                filename = f"firebase_db_user_{normalized_id}_{current_timestamp}.json"
-                                                try:
-                                                    with open(filename, 'w') as f_out:
-                                                        json.dump(user_info, f_out, indent=2)
-                                                    print(f"{Colors.GREEN}[+] User data for '{identifier}' saved to {filename}{Colors.ENDC}")
-                                                except IOError as e:
-                                                    print(f"{Colors.FAIL}[!] Error saving user data for '{identifier}' to {filename}: {e}{Colors.ENDC}")
-                                            else:
-                                                print(f"{Colors.WARNING}[!] Could not determine a suitable identifier for a record from {db_url} with key {key}. Not saving to individual file.{Colors.ENDC}")
-                                    
-                                    if user_count > 0:
-                                        print(f"{Colors.GREEN}[+] Extracted {user_count} potential user records from {db_url}{Colors.ENDC}")
-                                        # Do not break here if you want to check all paths in all db_urls. 
-                                        # If break is desired, it should be handled based on whether *any* user was found in *any* path.
-                                        
-                            except json.JSONDecodeError:
-                                print(f"{Colors.WARNING}[!] Failed to decode JSON from {db_url}{Colors.ENDC}")
-                                continue
+                                if data is None:
+                                    print(f"{Colors.YELLOW}○{Colors.ENDC} (null)")
+                                    continue
                                 
-                    except Exception as e:
-                        continue
+                                data_size = len(str(data))
+                                print(f"{Colors.GREEN}✓{Colors.ENDC} ({data_size} chars)")
+                                
+                                # Extract users from this data
+                                current_timestamp = int(time.time())
+                                extracted_users = self._analyze_and_extract_users(
+                                    data, full_url, path, current_timestamp
+                                )
+                                
+                                users.extend(extracted_users)
+                                
+                                if extracted_users:
+                                    print(f"    {Colors.GREEN}[+] Extracted {len(extracted_users)} user records{Colors.ENDC}")
+                                
+                            except json.JSONDecodeError:
+                                print(f"{Colors.WARNING}○{Colors.ENDC} (non-JSON)")
+                    
+                    elif response.status_code in [401, 403]:
+                        print(f"{Colors.GREEN}🔒{Colors.ENDC} (secured)")
+                    else:
+                        print(f"{Colors.FAIL}✗{Colors.ENDC}")
+                    
+                except Exception:
+                    print(f"{Colors.FAIL}✗{Colors.ENDC}")
+                    continue
+                
+                time.sleep(0.1)  # Rate limiting
+        
+        return users
+
+    def _analyze_and_extract_users(self, data: any, url: str, path: str, timestamp: int) -> List[Dict]:
+        """Analyze database data and extract user information"""
+        extracted_users = []
+        
+        if isinstance(data, dict):
+            # Check if this looks like a users collection
+            if any(self._looks_like_user_record(value) for value in data.values() if isinstance(value, dict)):
+                for key, value in data.items():
+                    if isinstance(value, dict) and self._looks_like_user_record(value):
+                        user_info = self._extract_user_fields(value, key, url, path, timestamp)
+                        extracted_users.append(user_info)
             
-            return users
+            # Check if this is a single user record
+            elif self._looks_like_user_record(data):
+                user_info = self._extract_user_fields(data, 'single_record', url, path, timestamp)
+                extracted_users.append(user_info)
+        
+        elif isinstance(data, list):
+            for i, item in enumerate(data):
+                if isinstance(item, dict) and self._looks_like_user_record(item):
+                    user_info = self._extract_user_fields(item, f"item_{i}", url, path, timestamp)
+                    extracted_users.append(user_info)
+        
+        return extracted_users
+
+    def _looks_like_user_record(self, record: Dict) -> bool:
+        """Determine if a record looks like user data"""
+        if not isinstance(record, dict):
+            return False
+        
+        user_indicators = [
+            'email', 'Email', 'mail', 'emailAddress',
+            'username', 'userName', 'user_name',
+            'name', 'Name', 'displayName', 'fullName',
+            'uid', 'userId', 'user_id', 'localId',
+            'password', 'passwordHash', 'hashedPassword',
+            'role', 'permissions', 'admin'
+        ]
+        
+        matches = sum(1 for field in user_indicators if field in record)
+        return matches >= 2
+
+    def _extract_user_fields(self, record: Dict, key: str, url: str, path: str, timestamp: int) -> Dict:
+        """Extract and normalize user fields from a record"""
+        user_info = {
+            'extraction_source': 'database_extraction',
+            'database_url': url,
+            'database_path': path,
+            'database_key': key,
+            'timestamp': timestamp,
+            'raw_data': record
+        }
+        
+        # Field mapping
+        field_mappings = {
+            'email': ['email', 'Email', 'mail', 'emailAddress'],
+            'username': ['username', 'userName', 'user_name'],
+            'name': ['name', 'Name', 'displayName', 'fullName'],
+            'user_id': ['uid', 'id', 'userId', 'user_id', 'localId'],
+            'password': ['password', 'passwordHash', 'hashedPassword'],
+            'role': ['role', 'Role', 'userRole', 'permissions', 'admin']
+        }
+        
+        for normalized_field, possible_keys in field_mappings.items():
+            for key_name in possible_keys:
+                if key_name in record:
+                    user_info[normalized_field] = record[key_name]
+                    break
+        
+        # Save individual user file
+        identifier = (user_info.get('user_id') or 
+                    user_info.get('email') or 
+                    user_info.get('username') or 
+                    key)
+        
+        if identifier:
+            normalized_id = re.sub(r'[^a-zA-Z0-9_.-]', '_', str(identifier))[:50]
+            filename = f"firebase_db_user_{normalized_id}_{timestamp}.json"
+            try:
+                with open(filename, 'w') as f:
+                    json.dump(user_info, f, indent=2)
+                print(f"      {Colors.GREEN}[✓] User data saved to {filename}{Colors.ENDC}")
+            except IOError as e:
+                print(f"      {Colors.FAIL}[!] Error saving {filename}: {e}{Colors.ENDC}")
+        
+        return user_info
 
     def _fetch_profile_from_open_databases(self, email: str) -> Optional[Dict]:
         """Attempt to fetch a user's profile from commonly exposed database paths using their email."""

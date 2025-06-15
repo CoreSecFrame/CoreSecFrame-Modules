@@ -4929,30 +4929,16 @@ class FirebaseScannerModule(ToolModule):
             return False
 
     def _get_install_command(self, pkg_manager: str) -> List[str]:
-        """Return installation commands for different package managers"""
-        commands = {
-            'apt': [
+        if pkg_manager == 'apt':
+            return [
                 "apt-get update",
                 "apt-get install -y python3 python3-pip",
-                "pip3 install requests"
-            ],
-            'yum': [
-                "yum update -y",
-                "yum install -y python3 python3-pip",
-                "pip3 install requests"
-            ],
-            'dnf': [
-                "dnf update -y",
-                "dnf install -y python3 python3-pip",
-                "pip3 install requests"
-            ],
-            'pacman': [
-                "pacman -Sy",
-                "pacman -S python python-pip --noconfirm",
-                "pip install requests"
+                "apt-get install -y python3-requests"
             ]
-        }
-        return commands.get(pkg_manager, [])
+        else:
+            # For other package managers, return an empty list or a generic pip command.
+            # Returning empty is safer to avoid making incorrect assumptions.
+            return []
 
     def _get_update_command(self, pkg_manager: str) -> List[str]:
         """Return update commands"""
